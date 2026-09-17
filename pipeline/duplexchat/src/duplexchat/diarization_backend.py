@@ -129,8 +129,8 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
         from nemo.collections.asr.models import SortformerEncLabelModel
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
-            "Sortformer diarization requires NVIDIA NeMo. Install the sortformer "
-            "dependency profile before using an NVIDIA Sortformer model."
+            f"Sortformer diarization requires NVIDIA NeMo (nemo_toolkit[asr]). "
+            f"Import failed with error: {exc}. Please install requirements: pip install nemo_toolkit[asr]"
         ) from exc
 
     target_path = Path(local_target)
