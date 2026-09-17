@@ -9,6 +9,10 @@ set -e
 # A shared ID makes split/separation timing accumulate in one inspectable report.
 export PIPELINE_RUN_ID="${PIPELINE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
+# Directory root của project
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="${PROJECT_ROOT}:${PROJECT_ROOT}/pipeline/duplexchat/src:${PYTHONPATH:-}"
+
 # --- Cấu hình Môi trường ---
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1

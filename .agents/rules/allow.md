@@ -7,4 +7,3 @@ Cho phép tự đồng ý quyền liên quan đến thư mục dự án như ch�
 Không được đụng vào môi trường tổng, phải sử dụng conda env hoặc .venv cục bộ
 
 Cho phép truy cập, đọc các tài liệu trên internet internet.
-

@@ -6,6 +6,10 @@
 
 set -e
 
+# Directory root của project
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="${PROJECT_ROOT}:${PROJECT_ROOT}/pipeline/duplexchat/src:${PYTHONPATH:-}"
+
 # --- Cấu hình Môi trường ---
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
