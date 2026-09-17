@@ -11,6 +11,7 @@ import torch
 from core.model_utils import (
     assert_local_model_exists,
     enforce_offline_mode,
+    is_offline_mode,
     resolve_local_model_path,
 )
 
@@ -45,8 +46,9 @@ def load_whisper_lid_model(
                 local_target, required_files=["config.json"], model_name_hint="Whisper LID"
             )
 
-        processor = WhisperProcessor.from_pretrained(target_str, local_files_only=True)
-        model = WhisperForConditionalGeneration.from_pretrained(target_str, local_files_only=True)
+        offline = is_offline_mode()
+        processor = WhisperProcessor.from_pretrained(target_str, local_files_only=offline)
+        model = WhisperForConditionalGeneration.from_pretrained(target_str, local_files_only=offline)
         model.to(torch.device(resolved_device))
         model.eval()
 

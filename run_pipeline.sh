@@ -16,35 +16,45 @@ export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-# 1. Cấu hình Offline
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export GPU_ID="2"
+# 1. Cấu hình Môi trường thực thi: dev (tải online từ HuggingFace) hoặc sever (offline, bắt buộc local)
+export MODE="${MODE:-sever}"   # "dev" (huggingface) hoặc "sever" (local)
+export GPU_ID="${GPU_ID:-2}"
+
+if [ "$MODE" = "sever" ] || [ "$MODE" = "server" ] || [ "$MODE" = "offline" ]; then
+    echo "[MODE: SEVER] Chạy chế độ Offline (chỉ dùng model local disk, cấm tải mạng)"
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    export HF_DATASETS_OFFLINE=1
+else
+    echo "[MODE: DEV] Chạy chế độ Dev (cho phép tải model tự động từ HuggingFace Hub)"
+    unset HF_HUB_OFFLINE
+    unset TRANSFORMERS_OFFLINE
+    unset HF_DATASETS_OFFLINE
+fi
 
 # 2. Chọn pipeline: duplexchat / sommelier
-PIPELINE="duplexchat"
+PIPELINE="${PIPELINE:-duplexchat}"
 
 # 3. Base paths dùng chung
-BASE_MODELS="/storage-voice/voice/vdt/baottn/duplex-model-dir"
-BASE_DATA="/storage-voice/voice/vdt/baottn/duplex-data"
+BASE_MODELS="${BASE_MODELS:-/storage-voice/voice/vdt/baottn/duplex-model-dir}"
+BASE_DATA="${BASE_DATA:-/storage-voice/voice/vdt/baottn/duplex-data}"
 
 # 4. Models
-export DUPLEX_MODEL_DIR="$BASE_MODELS"
-export DIALOGUESIDON_MODEL_PATH="$BASE_MODELS/DialogueSidon"
-export DNSMOS_DIR="$BASE_MODELS/dnsmos"
-export SPEECHBRAIN_MODEL_PATH="$BASE_MODELS/spkrec-ecapa-voxceleb"
-export NISQA_MODEL_PATH="$BASE_MODELS/nisqa.tar"
-export SQUIM_MODEL_PATH="$BASE_MODELS/squim_objective_dns2020.pth"
-export WHISPER_MODEL_PATH="/raid/voice/chauhn3/whisper/whisper-large-v3"
+export DUPLEX_MODEL_DIR="${DUPLEX_MODEL_DIR:-$BASE_MODELS}"
+export DIALOGUESIDON_MODEL_PATH="${DIALOGUESIDON_MODEL_PATH:-$BASE_MODELS/DialogueSidon}"
+export DNSMOS_DIR="${DNSMOS_DIR:-$BASE_MODELS/dnsmos}"
+export SPEECHBRAIN_MODEL_PATH="${SPEECHBRAIN_MODEL_PATH:-$BASE_MODELS/spkrec-ecapa-voxceleb}"
+export NISQA_MODEL_PATH="${NISQA_MODEL_PATH:-$BASE_MODELS/nisqa.tar}"
+export SQUIM_MODEL_PATH="${SQUIM_MODEL_PATH:-$BASE_MODELS/squim_objective_dns2020.pth}"
+export WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-/raid/voice/chauhn3/whisper/whisper-large-v3}"
 
-# 5. Data directories
-CRAWL_DIR="$BASE_DATA/crawl/"
-
-SOURCE="youtube"
-RAW_DIR="$BASE_DATA/raw/$SOURCE"
-DIALOGUE_DIR="$BASE_DATA/processed/dialogue/$SOURCE"
-DUPLEX_OUT_DIR="$BASE_DATA/processed/duplexchat/$SOURCE"
-SOMMELIER_OUT_DIR="$BASE_DATA/processed/sommelier/$SOURCE"
+# 5. Data directories (hỗ trợ override trực tiếp từ biến môi trường bên ngoài)
+SOURCE="${SOURCE:-youtube}"
+CRAWL_DIR="${CRAWL_DIR:-$BASE_DATA/crawl/}"
+RAW_DIR="${RAW_DIR:-$BASE_DATA/raw/$SOURCE}"
+DIALOGUE_DIR="${DIALOGUE_DIR:-$BASE_DATA/processed/dialogue/$SOURCE}"
+DUPLEX_OUT_DIR="${DUPLEX_OUT_DIR:-$BASE_DATA/processed/duplexchat/$SOURCE}"
+SOMMELIER_OUT_DIR="${SOMMELIER_OUT_DIR:-$BASE_DATA/processed/sommelier/$SOURCE}"
 
 echo "======================================================================"
 echo " 0. CONVERT TO WAV"

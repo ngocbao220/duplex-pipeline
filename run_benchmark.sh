@@ -13,10 +13,21 @@ export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-# 1. Cấu hình Offline
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export GPU_ID="2"
+# 1. Cấu hình Môi trường thực thi: dev (tải online từ HuggingFace) hoặc sever (offline, bắt buộc local)
+export MODE="${MODE:-sever}"   # "dev" (huggingface) hoặc "sever" (local)
+export GPU_ID="${GPU_ID:-2}"
+
+if [ "$MODE" = "sever" ] || [ "$MODE" = "server" ] || [ "$MODE" = "offline" ]; then
+    echo "[MODE: SEVER] Chạy chế độ Offline (chỉ dùng model local disk, cấm tải mạng)"
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    export HF_DATASETS_OFFLINE=1
+else
+    echo "[MODE: DEV] Chạy chế độ Dev (cho phép tải model tự động từ HuggingFace Hub)"
+    unset HF_HUB_OFFLINE
+    unset TRANSFORMERS_OFFLINE
+    unset HF_DATASETS_OFFLINE
+fi
 
 # 2. Base paths dùng chung
 BASE_MODELS="/storage-voice/voice/vdt/baottn/duplex-model-dir"
@@ -46,7 +57,7 @@ echo "======================================================================"
 echo " 3. DUPLEXCHAT: BENCHMARK STEREO (Đánh giá chất lượng âm thanh)"
 echo "======================================================================"
 
-python -m scripts.benchmark_stereo \
+python scripts/benchmark_stereo.py \
     --corpus "$DUPLEX_OUT_DIR" \
     --check-models \
     --dnsmos-model-dir "$DNSMOS_DIR" \

@@ -9,11 +9,25 @@ from pathlib import Path
 from typing import Any
 
 
+def is_offline_mode() -> bool:
+    """Return True if offline mode is enforced via environment variable."""
+    mode = os.environ.get("MODE") or os.environ.get("PIPELINE_MODE")
+    if mode:
+        return str(mode).strip().lower() in ("sever", "server", "offline", "prod", "production")
+    return os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+
+
 def enforce_offline_mode() -> None:
-    """Set environment variables enforcing offline behavior for Hugging Face and Transformers."""
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    os.environ["HF_DATASETS_OFFLINE"] = "1"
+    """Set environment variables enforcing offline behavior only if offline mode is enabled."""
+    if is_offline_mode():
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        os.environ["HF_DATASETS_OFFLINE"] = "1"
+    else:
+        # Online / dev mode: allow Hugging Face downloads
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        os.environ.pop("HF_DATASETS_OFFLINE", None)
     os.environ["ORT_DISABLE_TELEMETRY"] = "1"
     os.environ["ONNXRUNTIME_LOG_SEVERITY_LEVEL"] = "3"
 
@@ -164,9 +178,9 @@ def assert_local_model_exists(
 
 
 def get_offline_loader_kwargs(extra_kwargs: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return dictionary of loader options specifying local_files_only=True."""
+    """Return dictionary of loader options specifying local_files_only=True in offline/sever mode."""
     enforce_offline_mode()
-    kwargs: dict[str, Any] = {"local_files_only": True}
+    kwargs: dict[str, Any] = {"local_files_only": is_offline_mode()}
     if extra_kwargs:
         kwargs.update(extra_kwargs)
     return kwargs

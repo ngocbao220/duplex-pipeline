@@ -51,15 +51,16 @@ def _check_dnsmos(requested_dir: Path) -> dict:
 def _check_speechbrain(device: str) -> dict:
     try:
         import torch
+        from core.model_utils import is_offline_mode
         from .models import _speaker_encoder, _speaker_model_path
 
-        path = _speaker_model_path()
         encoder = _speaker_encoder(device)
         with torch.inference_mode():
             encoder.encode_batch(torch.from_numpy(_smoke_audio()).unsqueeze(0).to(device))
-        return _success(f"Resolved local bundle: {path}; encoder initialized and smoke embedding completed")
+        loc_desc = str(_speaker_model_path()) if is_offline_mode() else "speechbrain/spkrec-ecapa-voxceleb (Hub/local)"
+        return _success(f"Resolved bundle: {loc_desc}; encoder initialized and smoke embedding completed")
     except Exception as exc:
-        return _failure("ERROR", f"SpeechBrain local initialization failed: {type(exc).__name__}: {exc}")
+        return _failure("ERROR", f"SpeechBrain initialization failed: {type(exc).__name__}: {exc}")
 
 
 def _check_squim(device: str) -> dict:

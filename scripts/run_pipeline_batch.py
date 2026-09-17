@@ -38,17 +38,18 @@ def _check_model_status(name: str, raw_id: str | None, env_var: str | None = Non
                 return (str(p), f"INCOMPLETE (missing {', '.join(missing)})", False)
         return (str(p), "VALID (local)", True)
     
-    # Check offline requirement
-    is_offline = os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("TRANSFORMERS_OFFLINE") == "1"
-    if is_offline:
+    from core.model_utils import is_offline_mode
+    if is_offline_mode():
         return (str(resolved), "NOT FOUND (Offline mode requires local files)", False)
     return (str(resolved), "CONFIGURED (Remote HuggingFace Hub)", True)
 
 
 def _log_preflight_info(args, input_dir: Path, output_dir: Path) -> None:
     """Print available models with validity status and an ordered flow tree (1, 2, 3...)."""
+    from core.model_utils import is_offline_mode
+    mode_str = "SEVER (Offline / Local weights required)" if is_offline_mode() else "DEV (Online / HuggingFace Hub download allowed)"
     print("\n" + "=" * 70)
-    print(f" PIPELINE PREFLIGHT CHECK: Step [{args.step}] (GPU {args.gpu})")
+    print(f" PIPELINE PREFLIGHT CHECK: Step [{args.step}] (GPU {args.gpu}) | Mode: [{mode_str}]")
     print("=" * 70)
 
     # 1. Models check

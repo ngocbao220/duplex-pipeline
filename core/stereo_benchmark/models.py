@@ -224,18 +224,31 @@ def speaker_metrics(left: np.ndarray, right: np.ndarray, device: str) -> dict:
 @lru_cache(maxsize=2)
 def _speaker_encoder(device: str):
     from core.compat import ensure_runtime_compat
-    from core.model_utils import enforce_offline_mode
+    from core.model_utils import enforce_offline_mode, is_offline_mode
     ensure_runtime_compat()
     enforce_offline_mode()
     from speechbrain.inference.speaker import EncoderClassifier
 
-    local_target = _speaker_model_path()
-    return EncoderClassifier.from_hparams(
-        source=str(local_target),
-        savedir=str(local_target) if Path(local_target).is_dir() else None,
-        run_opts={"device": device},
-        local_files_only=True,
-    )
+    offline = is_offline_mode()
+    if offline:
+        local_target = _speaker_model_path()
+        return EncoderClassifier.from_hparams(
+            source=str(local_target),
+            savedir=str(local_target) if Path(local_target).is_dir() else None,
+            run_opts={"device": device},
+            local_files_only=True,
+        )
+    else:
+        from core.model_utils import resolve_local_model_path
+        target, is_dir = resolve_local_model_path(
+            "speechbrain/spkrec-ecapa-voxceleb", env_var="SPEECHBRAIN_MODEL_PATH", default_subpath="spkrec-ecapa-voxceleb"
+        )
+        return EncoderClassifier.from_hparams(
+            source=str(target),
+            savedir=str(target) if (is_dir or Path(target).is_dir()) else None,
+            run_opts={"device": device},
+            local_files_only=False,
+        )
 
 
 def _speaker_model_path() -> Path:

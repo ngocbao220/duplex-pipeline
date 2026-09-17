@@ -19,6 +19,7 @@ from huggingface_hub import hf_hub_download
 from .model_options import SEPARATION_MODELS, resolve_model_alias
 from core.model_utils import (
     enforce_offline_mode,
+    is_offline_mode,
     resolve_local_model_path,
 )
 from core.local_model_validation import (
@@ -119,7 +120,7 @@ def _load_dialoguesidon_models(device: str = "cuda", model_id: str | None = None
             paths = validate_local_dialoguesidon_model(local_target)
         else:
             paths = {
-                f: hf_hub_download(repo_id=str(local_target), filename=f, local_files_only=True)
+                f: hf_hub_download(repo_id=str(local_target), filename=f, local_files_only=is_offline_mode())
                 for f in MODEL_FILES
             }
 

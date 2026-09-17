@@ -82,6 +82,7 @@ def load_diarization_pipeline(
 from core.model_utils import (
     assert_local_model_exists,
     enforce_offline_mode,
+    is_offline_mode,
     resolve_local_model_path,
 )
 
@@ -133,7 +134,7 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
         ) from exc
 
     target_path = Path(local_target)
-    if not is_local and not target_path.exists():
+    if is_offline_mode() and not is_local and not target_path.exists():
         assert_local_model_exists(
             local_target,
             model_name_hint="NVIDIA Sortformer Diarization Model (e.g. diar_streaming_sortformer_4spk-v2.1.nemo)"
@@ -264,11 +265,12 @@ class SpeechBrainEmbeddingExtractor:
         local_target, _ = resolve_local_model_path(
             self.model_id, env_var="SPEECHBRAIN_MODEL_PATH", default_subpath="spkrec-ecapa-voxceleb"
         )
+        offline = is_offline_mode()
         self.model = EncoderClassifier.from_hparams(
             source=str(local_target),
             savedir=str(local_target) if Path(local_target).is_dir() else None,
             run_opts={"device": self.device},
-            local_files_only=True,
+            local_files_only=offline,
         )
 
     def extract(self, wav: torch.Tensor, sample_rate: int) -> torch.Tensor:
