@@ -1,0 +1,15 @@
+[project]
+name = "cholimex-runtime"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["duplex-pipelines[cholimex]", "soundfile", "torch==2.8.0", "torchaudio==2.8.0", "torchcodec>=0.6,<0.8", "wrapt>=2.4.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+duplex-pipelines = { path = "../..", editable = true }

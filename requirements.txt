@@ -1,0 +1,23 @@
+# Production requirements for duplex-pipelines
+# Use with internal index or wheelhouse:
+# pip install --no-index --find-links=/path/to/wheelhouse -r requirements.txt
+# OR
+# pip install --index-url http://<internal-pip-index>/simple -r requirements.txt
+
+tqdm
+pyannote.audio
+torch
+torchaudio
+torchcodec
+soundfile
+diffusers<=0.30.0
+huggingface-hub
+wrapt>=2.4.0
+onnxruntime
+speechbrain>=1.0,<2.0
+librosa>=0.10
+demucs
+Cython
+nemo_toolkit[asr]
+packaging
+pytest

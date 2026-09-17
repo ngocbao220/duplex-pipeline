@@ -1,0 +1,6 @@
+{
+  "sample_rate": 16000,
+  "overlap_threshold": 1.0,
+  "speaker_link_threshold": 0.75,
+  "demucs": false
+}

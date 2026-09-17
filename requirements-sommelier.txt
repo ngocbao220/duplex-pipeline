@@ -1,0 +1,35 @@
+# Requirements for Sommelier Conda Environment (Offline/Server compatible)
+# Python: >=3.10, <=3.12
+
+torch==2.7.1
+torchaudio==2.7.1
+torchmetrics==1.7.4
+
+# Audio processing
+soundfile==0.13.1
+pydub==0.25.1
+librosa==0.11.0
+pyloudnorm==0.1.1
+asteroid-filterbanks==0.4.0
+
+# Diarization & Speaker linking
+pyannote.audio==3.3.2
+speechbrain==1.0.3
+Cython==3.1.2
+packaging==24.2
+nemo_toolkit[asr]==2.2.0
+
+# Sommelier pipeline models & runtime
+panns-inference==0.1.1
+loguru==0.7.3
+lightning==2.4.0
+pandas==2.3.1
+requests==2.32.4
+tqdm==4.67.1
+huggingface-hub==0.33.4
+onnxruntime==1.22.1
+openai==1.97.1
+tritony==0.0.20
+g2pk==0.9.5
+faster-whisper==1.1.1
+whisperx==3.4.2

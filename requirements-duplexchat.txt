@@ -1,0 +1,31 @@
+# Requirements for DuplexChat Conda Environment (Offline/Server compatible)
+# Python: >=3.10, <=3.12
+# PyTorch: 2.8.x
+
+torch==2.8.0
+torchaudio==2.8.0
+
+# Audio I/O and processing
+soundfile==0.13.1
+pydub==0.25.1
+librosa==0.11.0
+demucs==4.0.1
+
+# Diarization backends & Speaker Embedding
+pyannote.audio==3.3.2
+speechbrain==1.0.3
+
+# Neural Audio / NeMo for Sortformer
+Cython==3.1.2
+packaging==24.2
+nemo_toolkit[asr]==2.2.0
+
+# Separation Backend (DialogueSidon)
+diffusers==0.30.0
+huggingface-hub==0.33.4
+wrapt==2.4.0
+onnxruntime==1.22.1
+
+# Utilities
+tqdm==4.67.1
+pytest==8.4.1
