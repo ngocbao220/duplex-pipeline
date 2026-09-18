@@ -18,12 +18,13 @@ from core.orchestration.logging_style import get_logger, section  # noqa: E402
 
 
 def run(source: Path, output: Path, config: dict):
+    import re
     logger = get_logger("sommelier")
     token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         raise RuntimeError("Sommelier requires HUGGINGFACE_TOKEN for pyannote diarization and embedding")
     _stage_sepreformer_checkpoint()
-    native = output / "native"
+    native = output / f"native_{source.stem}"
     input_dir = native / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
     copied = input_dir / source.name
@@ -48,11 +49,8 @@ def run(source: Path, output: Path, config: dict):
     else:
         env["SOMMELIER_LOG_LEVEL"] = env.get("SOMMELIER_LOG_LEVEL", "INFO")
 
-    logger.info("Overlap detection : Diarization by \"sortformer\" (load from %s)",
-                os.environ.get("DUPLEX_MODEL_DIR", "local"))
-    logger.info("Overlap separation: SepReformer (load from %s)",
-                os.environ.get("VILIER_SEPREFORMER_CHECKPOINT", "local"))
-    logger.info("")
+    sortformer_loc = os.environ.get("DUPLEX_MODEL_DIR", "local")
+    sepreformer_loc = os.environ.get("VILIER_SEPREFORMER_CHECKPOINT", "local")
 
     with tempfile.TemporaryDirectory(prefix="sommelier-config-") as temporary:
         config_path = Path(temporary) / "config.json"
@@ -64,7 +62,6 @@ def run(source: Path, output: Path, config: dict):
         raise RuntimeError("Sommelier completed without its JSON manifest")
     manifest_path = str(manifests[-1])
 
-    logger.info("Reconstruction...")
     stereo = _reconstruct_tracks(source, manifests[-1], output)
 
     # Log summary theo logging.md: Time/RTF mỗi bước
@@ -78,29 +75,45 @@ def run(source: Path, output: Path, config: dict):
         t_pre = metadata.get("step0_preprocess", {}).get("processing_time_seconds", 0.0)
         total_time = t_pre + t_dia + t_sep + t_constrain
 
-        def _rtf(t): return f"{t:.2f}s | RTF: {(t / audio_dur if audio_dur > 0 else 0.0):.4f}"
+        # Count overlap segments
+        segments = manifest_data.get("segments", [])
+        overlap_count = 0
+        for i in range(len(segments) - 1):
+            if segments[i].get("end", 0) > segments[i + 1].get("start", 0):
+                overlap_count += 1
 
-        logger.info("")
+        def _rtf_str(t):
+            rtf_val = (t / audio_dur) if audio_dur > 0 else 0.0
+            return f"Time: {t:.2f}s | RTF: {rtf_val:.4f}"
+
+        logger.info("Overlap detection: Diarization by \"sortformer\" (load from %s)", sortformer_loc)
+        logger.info("Found %d overlap part", overlap_count)
         if t_dia > 0:
-            logger.info("Overlap detection (Sortformer) — Time: %s", _rtf(t_dia))
+            logger.info("%s", _rtf_str(t_dia))
+        logger.info("")
+
+        logger.info("Overlap separation by \"SepReformer\" (load from %s)", sepreformer_loc)
         if t_sep > 0:
-            logger.info("Overlap separation (SepReformer) — Time: %s", _rtf(t_sep))
+            logger.info("%s", _rtf_str(t_sep))
+        logger.info("")
+
+        logger.info("Reconstruction")
         if t_constrain > 0:
-            logger.info("Reconstruction — Time: %s", _rtf(t_constrain))
+            logger.info("%s", _rtf_str(t_constrain))
         if audio_dur > 0:
             speed_x = audio_dur / total_time if total_time > 0 else 0.0
             logger.info("Audio: %.2fs | Total: %.2fs | Speed: %.2fx RT", audio_dur, total_time, speed_x)
-        logger.info("===> Done. Result saved to: %s", output)
+        logger.info("Done, result save to %s", output)
 
         table_lines = [
             "| Stage | Processing Time (s) | RTF |",
             "| :--- | :---: | :---: |",
             f"| Audio Duration | {audio_dur:.2f} | — |",
-            f"| VAD + Sortformer | {t_dia:.2f} | {(t_dia / audio_dur if audio_dur > 0 else 0.0):.4f} |",
-            f"| SepReformer Separation | {t_sep:.2f} | {(t_sep / audio_dur if audio_dur > 0 else 0.0):.4f} |",
+            f"| Overlap Detection (Sortformer) | {t_dia:.2f} | {(t_dia / audio_dur if audio_dur > 0 else 0.0):.4f} |",
+            f"| Overlap Separation (SepReformer) | {t_sep:.2f} | {(t_sep / audio_dur if audio_dur > 0 else 0.0):.4f} |",
         ]
         if t_constrain > 0:
-            table_lines.append(f"| Constrain Speakers | {t_constrain:.2f} | {(t_constrain / audio_dur if audio_dur > 0 else 0.0):.4f} |")
+            table_lines.append(f"| Reconstruction | {t_constrain:.2f} | {(t_constrain / audio_dur if audio_dur > 0 else 0.0):.4f} |")
         total_rtf = total_time / audio_dur if audio_dur > 0 else 0.0
         table_lines.append(f"| **Total** | **{total_time:.2f}** | **{total_rtf:.4f}** |")
         speech_content = "# Sommelier Speed & Performance Summary\n\n" + "\n".join(table_lines) + "\n"
@@ -137,6 +150,7 @@ def _stage_sepreformer_checkpoint() -> None:
 
 
 def _reconstruct_tracks(source: Path, manifest_path: Path, output: Path) -> Path:
+    import re
     import numpy as np
     import soundfile as sf
     from pydub import AudioSegment
@@ -162,7 +176,13 @@ def _reconstruct_tracks(source: Path, manifest_path: Path, output: Path) -> Path
         track[start:end] += samples[: end - start]
     if len(tracks) != 2:
         raise ValueError(f"Sommelier must produce exactly two speakers; got {len(tracks)}")
-    stereo = output / "audio.stereo.wav"
+
+    m = re.search(r"dialogue_(\d+)", source.stem)
+    if m:
+        stereo = output / f"stereo_{int(m.group(1))}.wav"
+    else:
+        stereo = output / "audio.stereo.wav"
+
     target_rate = 24000
     import torch
     stacked = np.stack([audio for _, audio in sorted(tracks.items())], axis=0)
@@ -180,4 +200,5 @@ def _reconstruct_tracks(source: Path, manifest_path: Path, output: Path) -> Path
 
     sf.write(stereo, out_samples, out_rate, subtype="PCM_16")
     return stereo
+
 

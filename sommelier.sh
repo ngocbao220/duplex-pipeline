@@ -3,7 +3,7 @@
 #
 # Cách dùng:
 #   MODE=dev GPU_ID=0 \
-#     RAW_DIR=/path/to/raw \
+#     DIALOGUE_DIR=/path/to/dialogue \
 #     SOMMELIER_OUT_DIR=/path/to/sommelier \
 #     bash sommelier.sh
 
@@ -14,6 +14,7 @@ source "$PROJECT_ROOT/scripts/env.sh"
 
 python "$PROJECT_ROOT/scripts/run_pipeline_batch.py" \
     --step sommelier \
-    --input-dir "$RAW_DIR" \
+    --input-dir "$DIALOGUE_DIR" \
     --output-dir "$SOMMELIER_OUT_DIR" \
     --gpu "$GPU_ID"
+

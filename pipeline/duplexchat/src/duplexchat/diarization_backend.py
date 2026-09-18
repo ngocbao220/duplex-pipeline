@@ -172,39 +172,63 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
     target_str = str(local_target)
 
     def _restore(path_str: str):
-        """Load .nemo với fallback patch spkcache_len nếu NeMo version cũ không nhận."""
+        """Load .nemo với fallback patch spkcache_len nếu NeMo version cũ không nhận.
+
+        Lỗi thường bị wrap trong Hydra/OmegaConf nên phải kiểm tra toàn bộ exception chain.
+        """
+        def _has_spkcache_err(exc: BaseException) -> bool:
+            """Đệ quy kiểm tra exception chain có chứa spkcache_len không."""
+            seen = set()
+            e: BaseException | None = exc
+            while e is not None and id(e) not in seen:
+                seen.add(id(e))
+                if "spkcache_len" in str(e):
+                    return True
+                e = e.__cause__ or e.__context__
+            return False
+
         try:
             return SortformerEncLabelModel.restore_from(path_str)
-        except TypeError as e:
-            if "spkcache_len" not in str(e):
+        except Exception as e:  # noqa: BLE001
+            if not _has_spkcache_err(e):
                 raise
-            # NeMo < 2.3 không có spkcache_len — patch bằng cách strip khỏi config
-            import tarfile, tempfile, json, yaml, shutil
+            # NeMo < 2.3 không có spkcache_len — patch bằng cách strip khỏi config YAML
+            import tarfile
+            import tempfile
             from omegaconf import OmegaConf
             with tempfile.TemporaryDirectory(prefix="nemo_patch_") as tmp:
                 tmp_path = Path(tmp)
-                with tarfile.open(path_str, "r") as tar:
-                    tar.extractall(tmp_path)
+                # .nemo là tar.gz — thử cả gz lẫn uncompressed
+                try:
+                    with tarfile.open(path_str, "r:gz") as tar:
+                        tar.extractall(tmp_path)
+                except tarfile.ReadError:
+                    with tarfile.open(path_str, "r:*") as tar:
+                        tar.extractall(tmp_path)
                 # Tìm model_config.yaml
                 cfg_file = next(tmp_path.rglob("model_config.yaml"), None)
                 if cfg_file is None:
-                    raise
+                    raise RuntimeError(
+                        "spkcache_len patch failed: model_config.yaml not found in .nemo archive. "
+                        "Please upgrade NeMo: pip install 'nemo_toolkit[asr]>=2.3.0'"
+                    ) from e
                 cfg = OmegaConf.load(cfg_file)
-                # Xóa spkcache_len khỏi sortformer_modules nếu có
+                # Xóa spkcache_len và bất kỳ key lạ nào khỏi sortformer_modules
                 try:
-                    sm = cfg.model.sortformer_modules
-                    if hasattr(sm, "spkcache_len"):
-                        OmegaConf.update(cfg, "model.sortformer_modules", 
-                                         {k: v for k, v in OmegaConf.to_container(sm).items() if k != "spkcache_len"})
+                    sm_node = OmegaConf.select(cfg, "model.sortformer_modules")
+                    if sm_node is not None:
+                        sm_dict = OmegaConf.to_container(sm_node, resolve=False)
+                        sm_dict.pop("spkcache_len", None)
+                        OmegaConf.update(cfg, "model.sortformer_modules", sm_dict, merge=False)
                 except Exception:
                     pass
                 OmegaConf.save(cfg, cfg_file)
                 # Đóng gói lại thành .nemo tạm
                 patched = tmp_path / "patched.nemo"
-                with tarfile.open(patched, "w:gz") as tar:
-                    for f in tmp_path.rglob("*"):
+                with tarfile.open(str(patched), "w:gz") as tar:
+                    for f in sorted(tmp_path.rglob("*")):
                         if f != patched and f.is_file():
-                            tar.add(f, arcname=f.relative_to(tmp_path))
+                            tar.add(f, arcname=str(f.relative_to(tmp_path)))
                 return SortformerEncLabelModel.restore_from(str(patched))
 
     if target_path.is_file() and target_str.endswith(".nemo"):

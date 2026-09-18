@@ -6,10 +6,12 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 from time import perf_counter
 from pathlib import Path
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -342,27 +344,64 @@ def run_batch():
                     print(f"Error processing {sdir.name} (exit code {timing['exit_code']})")
 
     elif args.step == "sommelier":
-        wav_files = sorted(list(input_dir.glob(args.pattern)))
-        if not wav_files:
-            print(f"No files matching '{args.pattern}' found in {input_dir}")
-            return
+        def _dialogue_key(p: Path) -> int:
+            m = re.search(r"dialogue_(\d+)", p.stem)
+            return int(m.group(1)) if m else 0
 
-        print(f"=== Running Sommelier on {len(wav_files)} files from {input_dir} (GPU {args.gpu}) ===")
-        for idx, wav in enumerate(wav_files, start=1):
-            sub_out = output_dir / wav.stem
-            cmd = [
-                sys.executable, "-m", "sommelier", "single",
-                "--input", str(wav),
-                "--output-dir", str(sub_out)
-            ]
-            print(f"[{idx}/{len(wav_files)}] {wav.name} -> {sub_out.name}")
-            if args.dry_run:
-                print("  Command:", " ".join(cmd))
-            else:
-                timing = _timed_subprocess(cmd, wav, sub_out, env)
-                timing_items.append(timing)
-                if timing["exit_code"] != 0:
-                    print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
+        subdirs = sorted([d for d in input_dir.iterdir() if d.is_dir()])
+        if subdirs:
+            print(f"=== Running Sommelier on {len(subdirs)} dialogue folders from {input_dir} (GPU {args.gpu}) ===")
+            for idx, sdir in enumerate(subdirs, start=1):
+                sub_out = output_dir / sdir.name
+                sub_out.mkdir(parents=True, exist_ok=True)
+                dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
+                if not dialogue_files:
+                    dialogue_files = sorted(list(sdir.glob(args.pattern)))
+                if not dialogue_files:
+                    print(f"[{idx}/{len(subdirs)}] No audio clips found in {sdir.name}")
+                    continue
+
+                print(f"[{idx}/{len(subdirs)}] {sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
+                for d_idx, dwav in enumerate(dialogue_files, start=1):
+                    cmd = [
+                        sys.executable, "-m", "sommelier", "single",
+                        "--input", str(dwav),
+                        "--output-dir", str(sub_out)
+                    ]
+                    print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
+                    if args.dry_run:
+                        print("    Command:", " ".join(cmd))
+                    else:
+                        timing = _timed_subprocess(cmd, dwav, sub_out, env)
+                        timing_items.append(timing)
+                        if timing["exit_code"] != 0:
+                            print(f"Error processing {dwav.name} (exit code {timing['exit_code']})")
+        else:
+            dialogue_files = sorted(list(input_dir.glob("dialogue_*.wav")), key=_dialogue_key)
+            if not dialogue_files:
+                dialogue_files = sorted(list(input_dir.glob(args.pattern)))
+            if not dialogue_files:
+                print(f"No files matching '{args.pattern}' found in {input_dir}")
+                return
+
+            print(f"=== Running Sommelier on {len(dialogue_files)} files from {input_dir} (GPU {args.gpu}) ===")
+            for idx, wav in enumerate(dialogue_files, start=1):
+                sub_out = output_dir / wav.stem
+                sub_out.mkdir(parents=True, exist_ok=True)
+                cmd = [
+                    sys.executable, "-m", "sommelier", "single",
+                    "--input", str(wav),
+                    "--output-dir", str(sub_out)
+                ]
+                print(f"[{idx}/{len(dialogue_files)}] {wav.name} -> {sub_out.name}")
+                if args.dry_run:
+                    print("  Command:", " ".join(cmd))
+                else:
+                    timing = _timed_subprocess(cmd, wav, sub_out, env)
+                    timing_items.append(timing)
+                    if timing["exit_code"] != 0:
+                        print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
+
 
     if not args.dry_run:
         phase = _phase_report(args.step, args, phase_started_at, perf_counter() - phase_started, timing_items)

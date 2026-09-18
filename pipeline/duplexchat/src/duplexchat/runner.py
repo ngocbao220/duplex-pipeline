@@ -426,6 +426,10 @@ def separate_dialogue_files(
     debug: bool = False,
 ) -> dict:
     """Takes input dialogue directory (or WAV file) and runs DialogueSidon separation model, generating 24kHz stereo outputs."""
+    import time
+    from tqdm import tqdm
+
+    logger = get_logger("duplexchat")
     input_path = Path(input_path_str)
     def _dialogue_key(p: Path) -> int:
         m = re.search(r"dialogue_(\d+)", p.stem)
@@ -449,12 +453,26 @@ def separate_dialogue_files(
             "dialogue_count": 0,
         }
 
+    # ===== Section header theo logging.md =====
+    print(section("DuplexChat"))
+    model_loc = separation_model or os.environ.get("DUPLEX_MODEL_DIR", "local")
+    logger.info("Separation by \"DialogueSidon\" (load from %s)", model_loc)
+    logger.info("+ Output sample rate: 24khz")
+    logger.info("")
+
     models = {device: load_separation_models(device=device, model_id=separation_model) for device in devices}
 
     rows = []
+    total_audio_sec = 0.0
+    t0 = time.perf_counter()
+
     try:
-        for index, dialogue_wav in enumerate(dialogue_files):
+        pbar = tqdm(dialogue_files, desc="Separating dialogues", unit="clip")
+        for index, dialogue_wav in enumerate(pbar):
             crop, sample_rate = load_wav_tensor(dialogue_wav)
+            clip_dur = float(crop.shape[-1] / sample_rate)
+            total_audio_sec += clip_dur
+
             device = devices[index % len(devices)]
             if torch.cuda.is_available() and device.startswith("cuda"):
                 torch.cuda.set_device(torch.device(device))
@@ -480,9 +498,32 @@ def separate_dialogue_files(
         for model in models.values():
             _release(model)
 
+    elapsed = time.perf_counter() - t0
+    rtf = (elapsed / total_audio_sec) if total_audio_sec > 0 else 0.0
+    logger.info("Time: %.2fs | RTF: %.4f", elapsed, rtf)
+    logger.info("Done, result save to %s", output_root)
+
+    try:
+        speed_x = (total_audio_sec / elapsed) if (elapsed > 0 and total_audio_sec > 0) else 0.0
+        table_lines = [
+            "| Stage | Processing Time (s) | RTF |",
+            "| :--- | :---: | :---: |",
+            f"| Total Dialogue Audio | {total_audio_sec:.2f} | — |",
+            f"| DialogueSidon Separation | {elapsed:.2f} | {rtf:.4f} |",
+            f"| **Total** | **{elapsed:.2f}** | **{rtf:.4f}** |",
+        ]
+        speech_content = f"# DuplexChat Speed & Performance Summary\n\nDialogues: {len(rows)} | Speed: {speed_x:.2f}x RT\n\n" + "\n".join(table_lines) + "\n"
+        (output_root / "speech.md").write_text(speech_content, encoding="utf-8")
+    except Exception:
+        pass
+
     return {
         "stereo_files": rows,
         "devices": devices,
         "dialogue_count": len(dialogue_files),
+        "total_audio_sec": total_audio_sec,
+        "elapsed_sec": elapsed,
+        "rtf": rtf,
     }
+
 
