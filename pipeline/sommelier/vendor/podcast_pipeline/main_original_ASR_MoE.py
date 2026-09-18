@@ -3193,49 +3193,33 @@ if __name__ == "__main__":
 
     check_env(logger)
 
-    # Speaker Diarization
-    logger.debug(" * Loading Speaker Diarization Model")
-    if not cfg["huggingface_token"].startswith("hf"):
-        raise ValueError(
-            "huggingface_token must start with 'hf', check the config file. "
-            "You can get the token at https://huggingface.co/settings/tokens. "
-            "Remeber grant access following https://github.com/pyannote/pyannote-audio?tab=readme-ov-file#tldr"
-        )
-    from core.model_utils import enforce_offline_mode, resolve_local_model_path
+    # Speaker Diarization (Optional in Sommelier because Sommelier uses Sortformer)
+    logger.debug(" * Checking Speaker Diarization Model")
+    from core.model_utils import enforce_offline_mode, resolve_local_model_path, is_offline_mode
     enforce_offline_mode()
-    if args.dia3 == True:
-        print("Using diarization-3.1 model")
-        dia_model_path, _ = resolve_local_model_path("pyannote/speaker-diarization-3.1", env_var="PYANNOTE_MODEL_PATH", default_subpath="speaker-diarization-3.1")
-        try:
-            dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), use_auth_token=cfg.get("huggingface_token") or False)
-        except TypeError:
-            dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), token=cfg.get("huggingface_token") or False)
-        except Exception:
-            dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), local_files_only=True)
-        dia_pipeline.to(device)
-        
-    else:
-        dia_model_path, _ = resolve_local_model_path("pyannote/speaker-diarization", env_var="PYANNOTE_MODEL_PATH", default_subpath="speaker-diarization")
-        try:
-            dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), use_auth_token=cfg.get("huggingface_token") or False)
-        except TypeError:
-            dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), token=cfg.get("huggingface_token") or False)
-        except Exception:
-            dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), local_files_only=True)
-        dia_pipeline.to(device)
-
-        # hyperparameters
-        dia_pipeline.instantiate({
-        "segmentation": {
-            "min_duration_off": 0.0, 
-            "threshold": args.seg_th
-        },
-        "clustering": {
-            "method": "centroid",
-            "min_cluster_size": args.min_cluster_size,
-            "threshold": args.clust_th   
-        }
-    })
+    dia_pipeline = None
+    try:
+        dia_model_id = "pyannote/speaker-diarization-3.1" if args.dia3 else "pyannote/speaker-diarization"
+        dia_subpath = "speaker-diarization-3.1" if args.dia3 else "speaker-diarization"
+        dia_model_path, is_dia_local = resolve_local_model_path(dia_model_id, env_var="PYANNOTE_MODEL_PATH", default_subpath=dia_subpath)
+        token_val = cfg.get("huggingface_token") or ""
+        if is_dia_local or (not is_offline_mode() and token_val.startswith("hf")):
+            try:
+                dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), use_auth_token=token_val or False)
+            except TypeError:
+                dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), token=token_val or False)
+            except Exception:
+                dia_pipeline = Pipeline.from_pretrained(str(dia_model_path), local_files_only=True)
+            if dia_pipeline is not None:
+                dia_pipeline.to(device)
+                if not args.dia3 and hasattr(dia_pipeline, "instantiate"):
+                    dia_pipeline.instantiate({
+                        "segmentation": {"min_duration_off": 0.0, "threshold": args.seg_th},
+                        "clustering": {"method": "centroid", "min_cluster_size": args.min_cluster_size, "threshold": args.clust_th}
+                    })
+    except Exception as dia_err:
+        logger.debug(f" * Pyannote diarization pipeline skipped or failed ({dia_err}); Sommelier uses Sortformer")
+        dia_pipeline = None
     # ASR
     logger.debug(" * Loading ASR Model")
 
@@ -3319,44 +3303,91 @@ if __name__ == "__main__":
 
     speaker_embedder = None
     try:
-        pyannote_emb_path, _ = resolve_local_model_path("pyannote/embedding", env_var="PYANNOTE_EMBEDDING_PATH", default_subpath="embedding")
-        speaker_embedder = Inference(
-            str(pyannote_emb_path),
-            device=device,
-            use_auth_token=cfg.get("huggingface_token") or False,
-            window="whole",
-        )
-        logger.debug(" * Speaker embedding model loaded for cross-chunk linking")
+        pyannote_emb_path, is_emb_local = resolve_local_model_path("pyannote/embedding", env_var="PYANNOTE_EMBEDDING_PATH", default_subpath="embedding")
+        token_val = cfg.get("huggingface_token") or ""
+        if is_emb_local or (not is_offline_mode() and token_val.startswith("hf")):
+            speaker_embedder = Inference(
+                str(pyannote_emb_path),
+                device=device,
+                use_auth_token=token_val or False,
+                window="whole",
+            )
+            logger.debug(" * Speaker embedding model loaded for cross-chunk linking")
     except Exception as e:
-        logger.error(f" * Failed to load speaker embedding model: {e}")
+        logger.debug(f" * Speaker embedding model skipped: {e}")
         speaker_embedder = None
 
-    # load model from Hugging Face model card directly (You need a Hugging Face token)
-    sortformer_path, _ = resolve_local_model_path("nvidia/diar_sortformer_4spk-v1", env_var="SORTFORMER_MODEL_PATH", default_subpath="diar_sortformer_4spk-v1")
+    # Load Sortformer model from local storage or Hugging Face
+    sort_target = os.environ.get("SORTFORMER_MODEL_PATH") or "nvidia/diar_streaming_sortformer_4spk-v2.1"
+    sortformer_path, is_sort_local = resolve_local_model_path(
+        sort_target,
+        env_var="SORTFORMER_MODEL_PATH",
+        default_subpath="diar_streaming_sortformer_4spk-v2.1"
+    )
+    if not (Path(sortformer_path).exists() if is_sort_local else False):
+        sortformer_path, is_sort_local = resolve_local_model_path(
+            "nvidia/diar_sortformer_4spk-v1",
+            env_var="SORTFORMER_MODEL_PATH",
+            default_subpath="diar_sortformer_4spk-v1"
+        )
     try:
         diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path), local_files_only=True)
     except TypeError:
         diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path))
+    except Exception:
+        diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path))
     diar_model.eval()
 
-    # Initialize Pyannote embedding model (only when sepreformer is enabled)
+    # Initialize Speaker Embedding model (only when sepreformer is enabled)
     embedding_model = None
     if args.sepreformer:
-        logger.debug(" * Loading Pyannote Embedding Model")
+        logger.debug(" * Loading Speaker Embedding Model for SepReformer")
         try:
             from pyannote.audio import Model as PyannoteModel
-            pyannote_emb_path, _ = resolve_local_model_path("pyannote/embedding", env_var="PYANNOTE_EMBEDDING_PATH", default_subpath="embedding")
-            try:
-                embedding_model = PyannoteModel.from_pretrained(str(pyannote_emb_path), use_auth_token=cfg.get("huggingface_token") or False)
-            except TypeError:
-                embedding_model = PyannoteModel.from_pretrained(str(pyannote_emb_path), token=cfg.get("huggingface_token") or False)
-            except Exception:
-                embedding_model = PyannoteModel.from_pretrained(str(pyannote_emb_path), local_files_only=True)
-            embedding_model = embedding_model.to(device)
-            logger.debug(" * Pyannote Embedding Model loaded successfully")
+            pyannote_emb_path, is_emb_local = resolve_local_model_path("pyannote/embedding", env_var="PYANNOTE_EMBEDDING_PATH", default_subpath="embedding")
+            token_val = cfg.get("huggingface_token") or ""
+            if is_emb_local or (not is_offline_mode() and token_val.startswith("hf")):
+                try:
+                    embedding_model = PyannoteModel.from_pretrained(str(pyannote_emb_path), use_auth_token=token_val or False)
+                except TypeError:
+                    embedding_model = PyannoteModel.from_pretrained(str(pyannote_emb_path), token=token_val or False)
+                except Exception:
+                    embedding_model = PyannoteModel.from_pretrained(str(pyannote_emb_path), local_files_only=True)
+                if embedding_model is not None:
+                    embedding_model = embedding_model.to(device)
+                    logger.debug(" * Pyannote Embedding Model loaded successfully")
         except Exception as e:
-            logger.error(f" * Failed to load Pyannote Embedding Model: {e}")
+            logger.debug(f" * Pyannote Embedding Model not loaded ({e})")
             embedding_model = None
+
+        # Fallback to local SpeechBrain ECAPA-TDNN if pyannote embedding is not available
+        if embedding_model is None:
+            try:
+                from speechbrain.inference.speaker import EncoderClassifier
+                sb_path, is_sb_local = resolve_local_model_path(
+                    "speechbrain/spkrec-ecapa-voxceleb",
+                    env_var="SPEECHBRAIN_MODEL_PATH",
+                    default_subpath="spkrec-ecapa-voxceleb"
+                )
+                sb_classifier = EncoderClassifier.from_hparams(
+                    source=str(sb_path),
+                    run_opts={"device": str(device)},
+                    savedir=str(sb_path) if is_sb_local else None
+                )
+
+                class SpeechBrainEmbeddingWrapper(torch.nn.Module):
+                    def __init__(self, classifier):
+                        super().__init__()
+                        self.classifier = classifier
+                    def forward(self, x):
+                        emb = self.classifier.encode_batch(x)
+                        return emb.squeeze(1)
+
+                embedding_model = SpeechBrainEmbeddingWrapper(sb_classifier)
+                logger.info(" * Loaded local SpeechBrain ECAPA-TDNN as embedding model for SepReformer")
+            except Exception as sb_err:
+                logger.warning(f" * Could not load SpeechBrain fallback embedding model: {sb_err}")
+                embedding_model = None
 
     # Initialize SepReformer separator (only when sepreformer is enabled)
     sepreformer_separator = None

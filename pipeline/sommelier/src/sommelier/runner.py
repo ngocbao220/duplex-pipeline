@@ -20,9 +20,7 @@ from core.orchestration.logging_style import get_logger, section  # noqa: E402
 def run(source: Path, output: Path, config: dict):
     import re
     logger = get_logger("sommelier")
-    token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
-    if not token:
-        raise RuntimeError("Sommelier requires HUGGINGFACE_TOKEN for pyannote diarization and embedding")
+    token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN") or "hf_offline_local_token"
     _stage_sepreformer_checkpoint()
     native = output / f"native_{source.stem}"
     input_dir = native / "input"

@@ -83,8 +83,11 @@ def _log_preflight_info(args, input_dir: Path, output_dir: Path) -> None:
 
     elif args.step == "sommelier":
         models_to_check.append(("SepReformer Checkpoint", os.environ.get("VILIER_SEPREFORMER_CHECKPOINT"), "VILIER_SEPREFORMER_CHECKPOINT", None, None))
+        sort_model = os.environ.get("SORTFORMER_MODEL_PATH") or "nvidia/diar_streaming_sortformer_4spk-v2.1"
+        models_to_check.append(("Sortformer Diarization", sort_model, "SORTFORMER_MODEL_PATH", "diar_streaming_sortformer_4spk-v2.1", None))
+        models_to_check.append(("Speaker Embedding", "speechbrain/spkrec-ecapa-voxceleb", "SPEECHBRAIN_MODEL_PATH", "spkrec-ecapa-voxceleb", None))
         hf_token_set = bool(os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN"))
-        token_status = "CONFIGURED" if hf_token_set else "MISSING (Required for Pyannote)"
+        token_status = "CONFIGURED" if hf_token_set else "OPTIONAL (Local models used in offline mode)"
         print(f"  ├── Hugging Face Token          : {token_status}")
 
     for idx, (label, raw_id, env_var, default_sub, req_files) in enumerate(models_to_check):

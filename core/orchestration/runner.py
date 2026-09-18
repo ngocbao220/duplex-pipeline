@@ -56,18 +56,39 @@ def pipeline_config(name, args, cfg):
     return config
 
 
+import shutil
+import sys
+
+
 def launch_pipeline(name, request, run_dir):
     request_path = run_dir / name / 'request.json'
     write_json(request_path, request)
     project = ROOT / 'pipeline' / name
-    env = dict(os.environ)
-    # Never let an activated parent venv or uv project override collapse the isolated environments.
-    env.pop('VIRTUAL_ENV', None)
-    env['UV_PROJECT_ENVIRONMENT'] = str(project / '.venv')
-    env['UV_CACHE_DIR'] = str(ROOT / '.uv-cache')
-    env.pop('PYTHONPATH', None)
-    command = ['uv', 'run', '--project', str(project), '--no-dev',
-               'python', str(ROOT / 'core/orchestration/worker.py'), '--request', str(request_path)]
+
+    uv_path = shutil.which('uv')
+    has_uv_venv = (project / '.venv').exists()
+    use_uv = uv_path is not None and (has_uv_venv or not os.environ.get('CONDA_PREFIX'))
+
+    if use_uv:
+        env = dict(os.environ)
+        # Never let an activated parent venv or uv project override collapse the isolated environments.
+        env.pop('VIRTUAL_ENV', None)
+        env['UV_PROJECT_ENVIRONMENT'] = str(project / '.venv')
+        env['UV_CACHE_DIR'] = str(ROOT / '.uv-cache')
+        env.pop('PYTHONPATH', None)
+        command = ['uv', 'run', '--project', str(project), '--no-dev',
+                   'python', str(ROOT / 'core/orchestration/worker.py'), '--request', str(request_path)]
+    else:
+        # Fallback to current Python interpreter (e.g. Conda environment)
+        env = dict(os.environ)
+        extra_paths = [str(ROOT), str(ROOT / 'pipeline' / name / 'src')]
+        existing_pythonpath = env.get('PYTHONPATH', '')
+        if existing_pythonpath:
+            env['PYTHONPATH'] = os.pathsep.join(extra_paths) + os.pathsep + existing_pythonpath
+        else:
+            env['PYTHONPATH'] = os.pathsep.join(extra_paths)
+        command = [sys.executable, str(ROOT / 'core/orchestration/worker.py'), '--request', str(request_path)]
+
     try:
         return stream_process(command, project, run_dir / name / 'worker.log', env)
     except OSError as exc:
