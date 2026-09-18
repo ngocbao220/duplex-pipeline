@@ -233,3 +233,10 @@ def extract_valid_dialogues(
                     result.append(chunk)
     return result
 
+
+def summarize(segments, gap_seconds: float = 5.0, min_duration_seconds: float = 10.0):
+    """Summarize detected conversation and valid dialogue spans."""
+    return (
+        split_into_dialogues(segments, gap_seconds=gap_seconds),
+        extract_valid_dialogues(segments, gap_seconds=gap_seconds, min_duration_seconds=min_duration_seconds),
+    )

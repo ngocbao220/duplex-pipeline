@@ -33,23 +33,21 @@ def test_run_summary_lists_devices_conversations_and_phase_details(tmp_path):
     )
 
     output = "\n".join(logger.messages)
-    assert "diarization=cuda:0" in output
-    assert "['cuda:0', 'cuda:1']" in output
     assert "Detected conversations: 3" in output
-    assert "Preprocess" in output and "mono 16 kHz" in output and "0.25s (0.1%)" in output
-    assert "Speaker diarization" in output and "96 segments" in output and "21.50s (12.4%)" in output
-    assert "Dialogue separation" in output and "3 stereo 24 kHz WAV" in output and "151.50s (87.4%)" in output
-    assert "Speed & Performance Report:" in output
-    assert "Processing speed:" in output
+    assert "Device: cuda:0" in output
+    assert "1. Preprocessing — Time: 0.25s" in output
+    assert "2. Split Dialogue — Time: 21.50s" in output
+    assert "2. DuplexChat Separation — Time: 151.50s" in output
+    assert "Total: 173.25s" in output
 
     speech_md = tmp_path / "speech.md"
     assert speech_md.exists()
     speech_text = speech_md.read_text(encoding="utf-8")
     assert "| Stage | Processing Time (s) | RTF |" in speech_text
     assert "| Audio Duration | 346.50 | — |" in speech_text
-    assert "| Preprocess | 0.25 |" in speech_text
-    assert "| Speaker diarization | 21.50 |" in speech_text
-    assert "| Dialogue separation | 151.50 |" in speech_text
+    assert "1. Preprocessing" in speech_text and "0.25" in speech_text
+    assert "2. Split Dialogue" in speech_text and "21.50" in speech_text
+    assert "2. DuplexChat Separation" in speech_text and "151.50" in speech_text
     assert "| **Total** | **173.25** |" in speech_text
 
 

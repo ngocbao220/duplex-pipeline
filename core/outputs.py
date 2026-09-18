@@ -115,7 +115,14 @@ def copy_file(src: Path, dest: Path) -> Path:
 
 def save_wav(path: Path, wav: torch.Tensor, sample_rate: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    torchaudio.save(str(path), wav.cpu(), sample_rate)
+    try:
+        import soundfile as sf
+        arr = wav.detach().cpu().numpy()
+        if arr.ndim == 2:
+            arr = arr.T  # soundfile expects (samples, channels)
+        sf.write(str(path), arr, sample_rate)
+    except Exception:
+        torchaudio.save(str(path), wav.cpu(), sample_rate)
     return path
 
 

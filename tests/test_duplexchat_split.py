@@ -125,6 +125,7 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
         str(source_wav),
         output_dir=str(output_root),
         filter_music=False,
+        filter_vietnamese=False,
     )
 
     assert manifest["dialogue_count"] == 1

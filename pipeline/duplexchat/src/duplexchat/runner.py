@@ -6,6 +6,7 @@ Outputs: Numbered 24 kHz stereo WAVs, with optional phase-debug artifacts.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 import re
 import shutil

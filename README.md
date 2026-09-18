@@ -83,12 +83,12 @@ pip install -r requirements-sommelier.txt
 Mọi shell script đều hỗ trợ trực tiếp các cờ nguồn dữ liệu (`--youtube`, `--podcast-index`, `--all`), cờ GPU (`--gpu <id>`), cờ môi trường (`--dev`, `--sever`), và cờ chạy thử an toàn (`--dry-run`).
 
 ### 2.0. Chuyển đổi Dữ liệu Thô (Convert to WAV)
-Chuyển đổi các file crawled `.webm`, `.m4a`, `.tar.gz` sang chuẩn WAV PCM 16kHz mono:
+Chuyển đổi các file crawled `.webm`, `.m4a`, `.tar.gz` sang chuẩn WAV PCM 16kHz mono. Sử dụng đa luồng CPU (mỗi tiến trình gán cứng `-threads 1` để CPU $\le$ 100%):
 
 ```bash
-bash convert.sh --youtube         # Chỉ chuyển đổi dữ liệu YouTube
-bash convert.sh --podcast-index   # Chỉ chuyển đổi dữ liệu Podcast Index
-bash convert.sh --all             # Chuyển đổi cả hai (mặc định)
+bash convert.sh --youtube --workers 8         # Chuyển đổi dữ liệu YouTube (8 workers)
+bash convert.sh --podcast-index --workers 8   # Chuyển đổi dữ liệu Podcast Index (8 workers)
+bash convert.sh --all --workers 8             # Chuyển đổi cả hai nguồn (mặc định)
 ```
 
 ---
@@ -98,22 +98,21 @@ Chạy tuần tự toàn bộ các pha: Lọc cuộc thoại $\rightarrow$ Tách
 
 ```bash
 # Bằng Shell Script:
-bash run_pipeline.sh --youtube                   # Chạy cho folder YouTube (GPU 2 mặc định)
-bash run_pipeline.sh --podcast-index             # Chạy cho folder Podcast Index
-bash run_pipeline.sh --all                       # Chạy tuần tự cho cả hai nguồn
-bash run_pipeline.sh --sommelier --youtube       # Chạy pipeline Sommelier
-bash run_pipeline.sh --youtube --gpu 0           # Chỉ định GPU 0
-bash run_pipeline.sh --youtube --dev             # Chạy chế độ Dev (online)
-bash run_pipeline.sh --youtube --dry-run         # Chạy thử (không ghi dữ liệu)
+bash run_pipeline.sh --youtube --gpu 0 --workers 2      # Chạy full cho YouTube trên GPU 0 (2 workers)
+bash run_pipeline.sh --podcast-index --gpu 1 --workers 2# Chạy full cho Podcast Index trên GPU 1
+bash run_pipeline.sh --all --gpu 0 --workers 2          # Chạy tuần tự cho cả hai nguồn
+bash run_pipeline.sh --sommelier --youtube --workers 2  # Chạy pipeline Sommelier
+bash run_pipeline.sh --youtube --dev                    # Chạy chế độ Dev (online HuggingFace)
+bash run_pipeline.sh --youtube --dry-run                # Chạy thử (không ghi dữ liệu)
 
 # Hoặc bằng Python (Hydra):
 python run_pipeline.py \
     step=all \
     pipeline=duplexchat \
     env=sever \
-    gpu=2 \
+    gpu=0 \
+    optimization.workers=2 \
     data.source=youtube \
-    debug=false \
     dry_run=false
 ```
 
@@ -122,7 +121,8 @@ python run_pipeline.py \
 - `--podcast-index` / `data.source=podcast_index`: Chọn folder dữ liệu Podcast Index (`data/raw/podcast_index`).
 - `--all`: Chạy lần lượt cho cả hai folder dữ liệu.
 - `--duplexchat` / `--sommelier`: Chọn pipeline tách âm (`duplexchat` hoặc `sommelier`).
-- `--gpu <id>` / `gpu=<id>`: ID card GPU thực thi (ví dụ: `0`, `1`, `2` hoặc `"0,1"`).
+- `--gpu <id>` / `gpu=<id>`: ID card GPU thực thi (ví dụ: `0`, `1`, `2`).
+- `--workers <N>` / `-w <N>` / `optimization.workers=<N>`: Số worker chạy song song (tối ưu cho A100 40GB).
 - `--dev`: Chuyển sang môi trường dev online.
 - `--dry-run` / `dry_run=true`: In câu lệnh sẽ thực thi mà không can thiệp dữ liệu.
 
@@ -134,18 +134,18 @@ python run_pipeline.py \
 Resample 16kHz, phân đoạn người nói (Streaming Sortformer), trích xuất các đoạn đối thoại đúng 2 người, lọc bỏ nhạc nền (Demucs) và kiểm tra tiếng Việt (Whisper LID).
 
 ```bash
-# Bằng Shell Script (dialogue_split.sh hoặc dialogue-split.sh):
-bash dialogue-split.sh --youtube                 # Chạy cho folder YouTube
-bash dialogue-split.sh --podcast-index           # Chạy cho folder Podcast Index
-bash dialogue-split.sh --all                     # Chạy tuần tự cho cả hai nguồn
-bash dialogue-split.sh --youtube --gpu 0         # Chỉ định GPU 0
-bash dialogue-split.sh --youtube --dry-run       # Chạy thử
+# Bằng Shell Script:
+bash dialogue_split.sh --youtube --gpu 0 --workers 4    # Lọc thoại YouTube (4 workers lấp đầy GPU A100)
+bash dialogue_split.sh --podcast-index --gpu 1 --workers 4
+bash dialogue_split.sh --all --gpu 0 --workers 4        # Chạy tuần tự cả 2 nguồn
+bash dialogue_split.sh --youtube --dry-run               # Chạy thử
 
 # Hoặc bằng Python (Hydra):
 python run_pipeline.py \
     step=split_dialogue \
     env=sever \
-    gpu=2 \
+    gpu=0 \
+    optimization.workers=4 \
     diarization=sortformer \
     pipeline.music_filter.enabled=true \
     pipeline.lid.enabled=true \
@@ -155,7 +155,8 @@ python run_pipeline.py \
 
 **Ý nghĩa các cờ:**
 - `step=split_dialogue`: Chạy pha phân đoạn và lọc thoại 2 người.
-- `diarization=sortformer`: Sử dụng mô hình `nvidia/diar_streaming_sortformer_4spk-v2.1` (hoặc `diarization=pyannote`).
+- `--workers 4`: Chạy song song 4 file audio trên GPU A100 (chiếm ~15-20GB / 40GB VRAM).
+- `diarization=sortformer`: Sử dụng mô hình `nvidia/diar_streaming_sortformer_4spk-v2.1`.
 - `pipeline.music_filter.enabled=true`: Bật bộ lọc loại bỏ nhạc nền bằng Demucs (`false` để tắt).
 - `pipeline.lid.enabled=true`: Bật nhận diện ngôn ngữ bằng Whisper để chỉ giữ thoại tiếng Việt.
 - `pipeline.lid.code=vi`: Mã ngôn ngữ cần lọc (mặc định `vi`).
@@ -167,19 +168,19 @@ Cắt chunk hội thoại và sử dụng mô hình khuếch tán DialogueSidon 
 
 ```bash
 # Bằng Shell Script:
-bash duplexchat.sh --youtube                     # Chạy cho folder YouTube
-bash duplexchat.sh --podcast-index               # Chạy cho folder Podcast Index
-bash duplexchat.sh --all                         # Chạy tuần tự cho cả hai nguồn
-bash duplexchat.sh --youtube --gpu 0             # Chỉ định GPU 0
-bash duplexchat.sh --youtube --chunk 60          # Cửa sổ cắt 60 giây
-bash duplexchat.sh --youtube --dry-run           # Chạy thử
+bash duplexchat.sh --youtube --chunk 60 --gpu 0 --workers 2  # Tách thoại 2 workers song song
+bash duplexchat.sh --podcast-index --chunk 60 --gpu 1 --workers 2
+bash duplexchat.sh --all --gpu 0 --workers 2
+bash duplexchat.sh --youtube --chunk 60                      # Mặc định GPU 2
+bash duplexchat.sh --youtube --dry-run                       # Chạy thử
 
 # Hoặc bằng Python (Hydra):
 python run_pipeline.py \
     step=separate_dialogue \
     pipeline=duplexchat \
     env=sever \
-    gpu=2 \
+    gpu=0 \
+    optimization.workers=2 \
     pipeline.separation.chunk=60.0 \
     pipeline.separation.num_steps=30 \
     data.source=youtube
@@ -187,8 +188,9 @@ python run_pipeline.py \
 
 **Ý nghĩa các cờ:**
 - `step=separate_dialogue`: Chạy pha tách kênh thoại với DuplexChat.
-- `--chunk 60` / `pipeline.separation.chunk=60.0`: Độ dài cửa sổ cắt nhỏ âm thanh khi tách (tính bằng giây, mặc định 60s).
-- `pipeline.separation.num_steps=30`: Số bước khử nhiễu (diffusion sampling steps) của DialogueSidon.
+- `--chunk 60` / `pipeline.separation.chunk=60.0`: Cửa sổ cắt nhỏ âm thanh khi tách (giây, mặc định 60s).
+- `--workers 2`: Tách song song 2 folder thoại cùng lúc (~12-16GB VRAM).
+- `pipeline.separation.num_steps=30`: Số bước khử nhiễu (diffusion sampling steps).
 
 ---
 
@@ -197,23 +199,24 @@ Phát hiện vùng overlap, tách âm chồng lấn bằng SepReformer và tái 
 
 ```bash
 # Bằng Shell Script:
-bash sommelier.sh --youtube                      # Chạy cho folder YouTube
-bash sommelier.sh --podcast-index                # Chạy cho folder Podcast Index
-bash sommelier.sh --all                          # Chạy tuần tự cho cả hai nguồn
-bash sommelier.sh --youtube --gpu 0              # Chỉ định GPU 0
-bash sommelier.sh --youtube --dry-run            # Chạy thử
+bash sommelier.sh --youtube --gpu 0 --workers 2         # Tách thoại Sommelier (2 workers)
+bash sommelier.sh --podcast-index --gpu 1 --workers 2
+bash sommelier.sh --all --gpu 0 --workers 2
+bash sommelier.sh --youtube --dry-run                   # Chạy thử
 
 # Hoặc bằng Python (Hydra):
 python run_pipeline.py \
     step=sommelier \
     pipeline=sommelier \
     env=sever \
-    gpu=2 \
+    gpu=0 \
+    optimization.workers=2 \
     data.source=youtube
 ```
 
 **Ý nghĩa các cờ:**
 - `step=sommelier`: Chạy pha tách và tái tạo âm thoại của Sommelier.
+- `--workers 2`: Tách song song 2 folder thoại cùng lúc.
 - `pipeline=sommelier`: Tự động nạp đường dẫn checkpoint `SEPREFORMER` từ config.
 
 ---
@@ -223,25 +226,26 @@ python run_pipeline.py \
 
 ```bash
 # Bằng Shell Script:
-bash benchmark.sh --youtube                      # Đánh giá kết quả DuplexChat trên YouTube
-bash benchmark.sh --podcast-index                # Đánh giá kết quả trên Podcast Index
-bash benchmark.sh --all                          # Đánh giá cả hai nguồn
-bash benchmark.sh --sommelier --youtube          # Đánh giá kết quả của Sommelier
-bash benchmark.sh --youtube --gpu 0              # Chỉ định GPU 0
+bash benchmark.sh --youtube --workers 4                 # Đánh giá DuplexChat YouTube (4 workers)
+bash benchmark.sh --podcast-index --workers 4           # Đánh giá Podcast Index
+bash benchmark.sh --sommelier --all --workers 4         # Đánh giá Sommelier cả hai nguồn
+bash benchmark.sh --youtube --gpu 0 --workers 4         # Chỉ định GPU 0
 
 # Hoặc bằng Python (Hydra):
 python run_pipeline.py \
     step=benchmark \
     pipeline=duplexchat \
     env=sever \
-    gpu=2 \
+    gpu=0 \
+    optimization.workers=4 \
     benchmark.check_models=true \
     data.source=youtube
 ```
 
 **Ý nghĩa các cờ:**
 - `step=benchmark`: Chạy benchmark đánh giá âm thanh đầu ra stereo và xuất báo cáo.
-- `benchmark.check_models=true`: Kiểm tra tính hợp lệ và đầy đủ của các checkpoint (DNSMOS ONNX, NISQA, SQUIM) trước khi đo.
+- `--workers 4`: Đo song song 4 file audio cùng lúc.
+- `benchmark.check_models=true`: Kiểm tra đầy đủ các checkpoint (DNSMOS ONNX, NISQA, SQUIM) trước khi đo.
 
 ---
 
@@ -289,7 +293,7 @@ Hệ thống được thiết kế đặc thù để khai thác tối đa năng 
 
 **Ví dụ kết hợp ghi đè:**
 ```bash
-bash dialogue-split.sh --youtube --gpu 0 pipeline.music_filter.enabled=false
+bash dialogue_split.sh --youtube --gpu 0 pipeline.music_filter.enabled=false
 bash duplexchat.sh --youtube --gpu 1 --chunk 90
 ```
 

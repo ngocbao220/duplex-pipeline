@@ -31,7 +31,8 @@ def _write_dialoguesidon_bundle(model_dir, *, corrupt_ssl: bool = False) -> None
     (model_dir / "model_manifest.json").write_text(json.dumps({"files": hashes}))
 
 
-def test_enforce_offline_mode():
+def test_enforce_offline_mode(monkeypatch):
+    monkeypatch.setenv("MODE", "sever")
     enforce_offline_mode()
     assert os.environ.get("HF_HUB_OFFLINE") == "1"
     assert os.environ.get("TRANSFORMERS_OFFLINE") == "1"

@@ -57,8 +57,8 @@ def convert_audio_to_wav(input_path: Path, output_path: Path) -> bool:
     return True
 
 
-def process_youtube(crawl_dir: Path, raw_dir: Path, workers: int = 4):
-    print(f"=== Processing YouTube crawl (workers={workers}) ===")
+def process_youtube(crawl_dir: Path, raw_dir: Path, workers: int = 4, dry_run: bool = False):
+    print(f"=== Processing YouTube crawl (workers={workers}, dry_run={dry_run}) ===")
     youtube_crawl = crawl_dir / "youtube"
     if not youtube_crawl.exists():
         print(f"Directory {youtube_crawl} does not exist. Skipping.")
@@ -74,6 +74,13 @@ def process_youtube(crawl_dir: Path, raw_dir: Path, workers: int = 4):
     youtube_raw = raw_dir / "youtube"
     youtube_raw.mkdir(parents=True, exist_ok=True)
     print(f"Found {len(webm_files)} YouTube files in {youtube_crawl}.")
+
+    if dry_run:
+        for idx, f in enumerate(webm_files, start=1):
+            out_name = f"youtube_{idx}.wav"
+            print(f"  [DRY RUN] {f.name} -> {youtube_raw / out_name}")
+        print(f"Finished YouTube: [DRY RUN] {len(webm_files)} files previewed.\n")
+        return
 
     tasks = []
     for idx, f in enumerate(webm_files, start=1):
@@ -101,8 +108,8 @@ def process_youtube(crawl_dir: Path, raw_dir: Path, workers: int = 4):
     )
 
 
-def process_podcast_index(crawl_dir: Path, raw_dir: Path, workers: int = 4):
-    print(f"=== Processing Podcast Index crawl (workers={workers}) ===")
+def process_podcast_index(crawl_dir: Path, raw_dir: Path, workers: int = 4, dry_run: bool = False):
+    print(f"=== Processing Podcast Index crawl (workers={workers}, dry_run={dry_run}) ===")
     podcast_crawl = crawl_dir / "podcast_index"
     if not podcast_crawl.exists():
         print(f"Directory {podcast_crawl} does not exist. Skipping.")
@@ -112,30 +119,31 @@ def process_podcast_index(crawl_dir: Path, raw_dir: Path, workers: int = 4):
         list(podcast_crawl.glob("*.tar"))
     )
     if not tar_files:
-        print(f"No archive files found in {podcast_crawl}. Skipping.")
+        print(f"No tar archives found in {podcast_crawl}. Skipping.")
         return
 
     podcast_raw = raw_dir / "podcast_index"
     podcast_raw.mkdir(parents=True, exist_ok=True)
     print(f"Found {len(tar_files)} tar archives in {podcast_crawl}.")
 
+    if dry_run:
+        for idx, f in enumerate(tar_files, start=1):
+            print(f"  [DRY RUN] Would extract archive {f.name} -> {podcast_raw}")
+        print(f"Finished Podcast Index: [DRY RUN] {len(tar_files)} archives previewed.\n")
+        return
+
     count = 0
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_path = Path(tmpdir)
-
-        for tar_f in tar_files:
-            print(f"Extracting audio from archive {tar_f.name}...")
-
-            with tarfile.open(tar_f, "r:*") as tar:
-                members = sorted(
-                    [
-                        m
-                        for m in tar.getmembers()
-                        if m.name.endswith(".audio.mp3")
-                        or m.name.endswith(".mp3")
-                    ],
-                    key=lambda m: m.name,
-                )
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        for tar_path in tar_files:
+            print(f"Extracting and converting {tar_path.name}...")
+            with tarfile.open(tar_path, "r:*") as tar:
+                members = [
+                    m
+                    for m in tar.getmembers()
+                    if m.isfile() and m.name.lower().endswith(".mp3")
+                ]
+                print(f"  Found {len(members)} mp3 files in {tar_path.name}")
 
                 extracted_tasks = []
                 for member in members:
@@ -215,13 +223,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Only process Podcast Index crawled files",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview actions without converting files",
+    )
 
     args = parser.parse_args()
 
     run_all = not args.youtube and not args.podcast_index
     if run_all or args.youtube:
-        process_youtube(args.crawl_dir, args.raw_dir, workers=args.workers)
+        process_youtube(args.crawl_dir, args.raw_dir, workers=args.workers, dry_run=args.dry_run)
     if run_all or args.podcast_index:
-        process_podcast_index(args.crawl_dir, args.raw_dir, workers=args.workers)
+        process_podcast_index(args.crawl_dir, args.raw_dir, workers=args.workers, dry_run=args.dry_run)
 
     print("Audio conversion complete!")

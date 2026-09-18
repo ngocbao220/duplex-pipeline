@@ -240,6 +240,7 @@ def test_nisqa_requires_explicit_local_checkpoint(monkeypatch):
     import core.stereo_benchmark.models as models
 
     monkeypatch.setattr(models, "_ensure_nisqa_installed", lambda: True)
+    monkeypatch.setattr(models, "_load_nisqa_model_class", lambda: object)
     monkeypatch.delenv("NISQA_MODEL_PATH", raising=False)
     monkeypatch.delenv("DUPLEX_MODEL_DIR", raising=False)
 

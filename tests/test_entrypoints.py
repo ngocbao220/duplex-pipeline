@@ -111,7 +111,7 @@ def test_duplexchat_cli_accepts_diarization_backend_and_model():
 def test_each_pipeline_owns_named_source_modules_with_contract_headers():
     root = Path(__file__).resolve().parents[1]
     expected = {
-        "duplexchat": {"preprocess.py", "diarization.py", "dialogues.py", "separation.py", "reconstruct.py", "runner.py"},
+        "duplexchat": {"preprocess.py", "diarization.py", "dialogue.py", "separation.py", "reconstruct.py", "runner.py"},
         "cholimex": {"preprocess.py", "vad.py", "regions.py", "speaker_assignment.py", "separation.py", "reconstruct.py", "runner.py"},
     }
     for name, modules in expected.items():
