@@ -66,6 +66,30 @@ class FileDiarizationAdapter:
         raise NotImplementedError
 
 
+def _disable_sortformer_streaming_mode(model: Any) -> None:
+    """Tắt cờ streaming_mode trong attribute và _cfg/cfg của NeMo model (tránh NotImplementedError ở NeMo cũ)."""
+    if hasattr(model, "streaming_mode"):
+        try:
+            model.streaming_mode = False
+        except Exception:
+            pass
+    for cfg_attr in ("_cfg", "cfg"):
+        c = getattr(model, cfg_attr, None)
+        if c is not None:
+            try:
+                from omegaconf import open_dict
+                with open_dict(c):
+                    c["streaming_mode"] = False
+            except Exception:
+                try:
+                    c["streaming_mode"] = False
+                except Exception:
+                    try:
+                        setattr(c, "streaming_mode", False)
+                    except Exception:
+                        pass
+
+
 class SortformerDiarizationAdapter(FileDiarizationAdapter):
     backend = "sortformer"
 
@@ -76,8 +100,8 @@ class SortformerDiarizationAdapter(FileDiarizationAdapter):
         try:
             predicted = self.model.diarize(audio=str(wav_path), batch_size=1)
         except NotImplementedError as exc:
-            if "Streaming mode is not implemented" in str(exc) and hasattr(self.model, "streaming_mode"):
-                self.model.streaming_mode = False
+            if "Streaming mode is not implemented" in str(exc):
+                _disable_sortformer_streaming_mode(self.model)
                 predicted = self.model.diarize(audio=str(wav_path), batch_size=1)
             else:
                 raise
@@ -296,6 +320,16 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
             diar_model = _restore(target_str)
         except Exception:
             diar_model = SortformerEncLabelModel.from_pretrained(target_str)
+
+    # Nếu NeMo version hiện tại không hỗ trợ streaming inference (v2.1/v2.2 ném NotImplementedError trong forward),
+    # chủ động tắt cờ streaming_mode trong _cfg để chạy offline forward mà không văng lỗi.
+    try:
+        import inspect
+        forward_src = inspect.getsource(diar_model.forward)
+        if 'raise NotImplementedError("Streaming mode is not implemented yet.")' in forward_src:
+            _disable_sortformer_streaming_mode(diar_model)
+    except Exception:
+        pass
 
     if hasattr(diar_model, "eval"):
         diar_model.eval()
