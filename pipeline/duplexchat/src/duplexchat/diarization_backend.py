@@ -163,42 +163,28 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
         ) from exc
 
     def _patch_sortformer_modules():
-        """Monkey-patch all classes in sortformer_modules and sortformer models to filter any unknown kwargs."""
+        """Monkey-patch SortformerModules to filter unknown kwargs like fifo_len, spkcache_len."""
         try:
             import inspect
             from nemo.collections.asr.modules import sortformer_modules
-            from nemo.collections.asr.models import sortformer_diar_models
 
-            modules_to_patch = [sortformer_modules, sortformer_diar_models]
-            try:
-                from nemo.collections.asr.models import sortformer_models
-                modules_to_patch.append(sortformer_models)
-            except Exception:
-                pass
+            cls = getattr(sortformer_modules, "SortformerModules", None)
+            if cls is not None and not getattr(cls, "_kwargs_filter_patched", False):
+                orig_init = cls.__init__
+                sig = inspect.signature(orig_init)
+                allowed_params = set(sig.parameters.keys())
 
-            for mod in modules_to_patch:
-                for attr_name in dir(mod):
-                    cls = getattr(mod, attr_name)
-                    if isinstance(cls, type) and not getattr(cls, "_kwargs_filter_patched", False):
-                        orig_init = cls.__init__
-                        try:
-                            sig = inspect.signature(orig_init)
-                            accepts_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-                            if not accepts_varkw:
-                                allowed_params = set(sig.parameters.keys())
-                                def make_patched(original, allowed):
-                                    def patched(self, *args, **kwargs):
-                                        safe_kwargs = {k: v for k, v in kwargs.items() if k in allowed}
-                                        return original(self, *args, **safe_kwargs)
-                                    return patched
-                                cls.__init__ = make_patched(orig_init, allowed_params)
-                                cls._kwargs_filter_patched = True
-                        except (ValueError, TypeError):
-                            pass
+                def patched(self, *args, **kwargs):
+                    safe_kwargs = {k: v for k, v in kwargs.items() if k in allowed_params}
+                    return orig_init(self, *args, **safe_kwargs)
+
+                cls.__init__ = patched
+                cls._kwargs_filter_patched = True
         except Exception:
             pass
 
     _patch_sortformer_modules()
+
 
     target_path = Path(local_target)
     if is_offline_mode() and not is_local and not target_path.exists():
