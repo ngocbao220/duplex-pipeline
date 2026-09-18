@@ -1,9 +1,11 @@
 # Requirements for Sommelier Conda Environment (Offline/Server compatible)
 # Python: >=3.10, <=3.12
 
-torch==2.7.1
-torchaudio==2.7.1
-torchmetrics==1.7.4
+# PyTorch: install according to your server CUDA version (e.g. cu121)
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2.0
+torchaudio>=2.2.0
+torchmetrics>=1.4.0
 
 # Audio processing
 soundfile==0.13.1
@@ -17,7 +19,7 @@ pyannote.audio==3.3.2
 speechbrain==1.0.3
 Cython==3.1.2
 packaging==24.2
-nemo_toolkit[asr]==2.2.0
+nemo_toolkit[asr]>=2.2.0
 
 # Sommelier pipeline models & runtime
 panns-inference==0.1.1
@@ -30,6 +32,8 @@ huggingface-hub==0.33.4
 onnxruntime==1.22.1
 openai==1.97.1
 tritony==0.0.20
-g2pk==0.9.5
-faster-whisper==1.1.1
-whisperx==3.4.2
+g2pk>=0.9.4
+
+# Optional: Only needed if running full ASR speech recognition (not used in separation pipeline)
+# faster-whisper==1.1.1
+# whisperx==3.4.2
