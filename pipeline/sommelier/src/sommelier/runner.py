@@ -48,7 +48,7 @@ def run(source: Path, output: Path, config: dict):
         env["SOMMELIER_LOG_LEVEL"] = env.get("SOMMELIER_LOG_LEVEL", "INFO")
 
     sortformer_loc = os.environ.get("DUPLEX_MODEL_DIR", "local")
-    sepreformer_loc = os.environ.get("VILIER_SEPREFORMER_CHECKPOINT", "local")
+    sepreformer_loc = os.environ.get("SEPREFORMER", "local")
 
     with tempfile.TemporaryDirectory(prefix="sommelier-config-") as temporary:
         config_path = Path(temporary) / "config.json"
@@ -131,12 +131,12 @@ def run(source: Path, output: Path, config: dict):
 
 def _stage_sepreformer_checkpoint() -> None:
     """Expose the shared checkpoint through original Sommelier's fixed lookup path."""
-    configured = os.environ.get("VILIER_SEPREFORMER_CHECKPOINT", "")
+    configured = os.environ.get("SEPREFORMER") or os.environ.get("VILIER_SEPREFORMER_CHECKPOINT", "")
     if not configured:
-        raise RuntimeError("Set VILIER_SEPREFORMER_CHECKPOINT to a trusted SepReformer .pt/.pth file")
+        raise RuntimeError("Set SEPREFORMER to a trusted SepReformer .pt/.pth file")
     checkpoint = Path(configured).expanduser().resolve()
     if not checkpoint.is_file() or checkpoint.suffix.lower() not in {".pt", ".pth"}:
-        raise RuntimeError(f"Invalid VILIER_SEPREFORMER_CHECKPOINT: {checkpoint}")
+        raise RuntimeError(f"Invalid SEPREFORMER: {checkpoint}")
     weights_dir = Path(__file__).resolve().parents[2] / "vendor" / "SepReformer" / "models" / "SepReformer_Base_WSJ0" / "log" / "pretrain_weights"
     weights_dir.mkdir(parents=True, exist_ok=True)
     link = weights_dir / checkpoint.name

@@ -18,6 +18,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/benchmark"))
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     parser.add_argument("--dnsmos-model-dir", type=Path, default=Path("models/dnsmos"), help="Directory containing Microsoft's sig_bak_ovr.onnx and model_v8.onnx")
+    parser.add_argument("--workers", "-w", type=int, default=2, help="Number of concurrent benchmark workers (default: 2)")
     parser.add_argument("--check-models", action="store_true", help="Check availability of all benchmark models and dependencies before running")
     parser.add_argument("--debug", action="store_true", help="Write separated channels and detailed event files")
     args = parser.parse_args()
@@ -38,7 +39,7 @@ def main() -> None:
         report, report_path = run_benchmark(args.audio, args.output_dir, args.device, args.debug, args.dnsmos_model_dir)
         print_summary(report, report_path)
     elif args.corpus:
-        report, report_path = run_corpus_benchmark(args.corpus, args.output_dir, args.device, args.debug, args.dnsmos_model_dir)
+        report, report_path = run_corpus_benchmark(args.corpus, args.output_dir, args.device, args.debug, args.dnsmos_model_dir, workers=args.workers)
         print("Pipeline: Stereo Full-Duplex Corpus Benchmark\n")
         print(render_tables(report["summary"]))
 

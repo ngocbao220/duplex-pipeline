@@ -46,18 +46,12 @@ def duplexchat(source, output, config):
     }
 
 
-def vilier(source, output, config):
-    from vilier.runner import run
-    return run(source, output, config)
-
-
 def sommelier(source, output, config):
     from sommelier.runner import run
     return run(source, output, config)
 
 
-
-ADAPTERS = {'cholimex': cholimex, 'duplexchat': duplexchat, 'vilier': vilier, 'sommelier': sommelier}
+ADAPTERS = {'cholimex': cholimex, 'duplexchat': duplexchat, 'sommelier': sommelier}
 
 
 def run_batch(request: dict, adapter=None) -> list[dict]:

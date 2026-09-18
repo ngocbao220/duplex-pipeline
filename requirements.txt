@@ -21,3 +21,6 @@ Cython
 nemo_toolkit[asr]
 packaging
 pytest
+omegaconf>=2.3.0
+hydra-core>=1.3.2
+

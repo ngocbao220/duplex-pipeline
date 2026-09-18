@@ -1,0 +1,7 @@
+# @package diarization
+backend: pyannote
+model: pyannote/speaker-diarization-community-1
+chunk_duration: null
+num_speakers: 2
+speaker_link_threshold: 0.75
+token_env: HUGGINGFACE_TOKEN

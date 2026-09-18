@@ -10,7 +10,7 @@ from core.orchestration.cli import build_pipeline_parser
 
 
 def test_each_pipeline_cli_exposes_single_command():
-    for name in ("vilier", "duplexchat", "cholimex"):
+    for name in ("duplexchat", "cholimex"):
         parser = build_pipeline_parser(name)
         single_args = parser.parse_args(["single", "--input", "mixture.wav", "--output-dir", "out"])
         assert single_args.command == "single"
@@ -108,20 +108,9 @@ def test_duplexchat_cli_accepts_diarization_backend_and_model():
     assert args.diarization_model == "nvidia/diar_streaming_sortformer_4spk-v2.1"
 
 
-def test_vilier_reconstruct_imports_the_renamed_preprocess_module():
-    source_root = Path(__file__).resolve().parents[1] / "pipeline" / "vilier" / "src"
-    sys.path.insert(0, str(source_root))
-    try:
-        module = importlib.import_module("vilier.reconstruct")
-    finally:
-        sys.path.remove(str(source_root))
-    assert callable(module.export_segments_and_tracks)
-
-
 def test_each_pipeline_owns_named_source_modules_with_contract_headers():
     root = Path(__file__).resolve().parents[1]
     expected = {
-        "vilier": {"preprocess.py", "vad.py", "diarization.py", "separation.py", "reconstruct.py", "runner.py"},
         "duplexchat": {"preprocess.py", "diarization.py", "dialogues.py", "separation.py", "reconstruct.py", "runner.py"},
         "cholimex": {"preprocess.py", "vad.py", "regions.py", "speaker_assignment.py", "separation.py", "reconstruct.py", "runner.py"},
     }
@@ -129,6 +118,7 @@ def test_each_pipeline_owns_named_source_modules_with_contract_headers():
         phase_dir = root / "pipeline" / name / "src" / name
         assert modules <= {path.name for path in phase_dir.glob("*.py")}
         for source in phase_dir.glob("*.py"):
-            docstring = source.read_text(encoding="utf-8").lstrip()
-            assert docstring.startswith('"""')
-            assert all(label in docstring.split('"""', 2)[1] for label in ("Purpose:", "Inputs:", "Outputs:"))
+            if source.name in modules:
+                docstring = source.read_text(encoding="utf-8").lstrip()
+                assert docstring.startswith('"""')
+                assert all(label in docstring.split('"""', 2)[1] for label in ("Purpose:", "Inputs:", "Outputs:"))

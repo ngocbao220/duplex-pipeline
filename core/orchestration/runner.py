@@ -10,19 +10,17 @@ from .contract import write_json
 from .process import stream_process
 
 ROOT = Path(__file__).resolve().parents[2]
-PIPELINES = ('cholimex', 'duplexchat', 'vilier')
+PIPELINES = ('cholimex', 'duplexchat', 'sommelier')
 
 
 def code_identity(name):
     digest = hashlib.sha256()
     locations = [ROOT / 'core', ROOT / 'pipeline' / name]
-    if name != 'vilier':
-        locations.append(ROOT / 'core')
     for location in locations:
         for directory, subdirs, files in os.walk(location):
             subdirs[:] = sorted(d for d in subdirs if not d.startswith('.') and d not in {'__pycache__', 'outputs', 'logs', 'inputs'})
-            for name in sorted(files):
-                path = Path(directory) / name
+            for filename in sorted(files):
+                path = Path(directory) / filename
                 if path.suffix in {'.py', '.toml', '.lock', '.yaml'}:
                     digest.update(str(path.relative_to(ROOT)).encode())
                     digest.update(path.read_bytes())
@@ -34,13 +32,8 @@ def pipeline_config(name, args, cfg):
         config = json.loads(json.dumps(asdict(cfg), default=str))
         config['debug'] = bool(args.debug)
         return config
-    path = args.vilier_config if name == 'vilier' else ROOT / 'configs/sommelier.json' if name == 'sommelier' else args.duplexchat_config
+    path = ROOT / 'configs/sommelier.json' if name == 'sommelier' else args.duplexchat_config
     config = json.loads(path.read_text())
-    if name == 'vilier':
-        config.setdefault('asr', {})['enabled'] = False
-        config.setdefault('state_labeling', {})['enabled'] = False
-        config.setdefault('runtime', {})['dry_run'] = False
-        config.setdefault('entrypoint', {})['sample_rate'] = args.sample_rate
     config['debug'] = bool(args.debug)
     if name == 'duplexchat':
         config['separate_chunk'] = float(getattr(args, 'separate_chunk', config.get('separate_chunk', 120.0)))

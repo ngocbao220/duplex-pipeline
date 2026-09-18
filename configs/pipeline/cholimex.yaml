@@ -1,0 +1,18 @@
+# @package pipeline
+name: cholimex
+
+backchannel_max_duration: 1.0
+min_vad_duration: 0.0
+vad_onset: null
+vad_offset: null
+vad_padding_ms: 30
+merge_gap: 0.0
+min_reference_duration: 2.0
+speaker_assignment_mode: relative_similarity
+cosine_similarity_threshold: 0.5
+overlap_padding: 0.1
+proposal_backend: dialoguesidon
+proposal_model: ${env.paths.dialoguesidon}
+overlap_separator_backend: dialoguesidon
+overlap_separator_model: ${env.paths.dialoguesidon}
+speaker_embedding_model: ${env.paths.speechbrain}

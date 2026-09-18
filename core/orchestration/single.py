@@ -24,7 +24,6 @@ def run_single(name: str, source: Path, output: Path, debug: bool, separate_chun
                            filter_music=filter_music, music_model=music_model,
                            diarization_backend=diarization_backend, diarization_model=diarization_model,
                            separation_model=separation_model,
-                           vilier_config=ROOT / "configs/vilier.json",
                            duplexchat_config=ROOT / "configs/duplexchat.json", sample_rate=16000)
     run_dir = output.parent / ".runs" / uuid.uuid4().hex
     result_path = run_dir / "results.json"

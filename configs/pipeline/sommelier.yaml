@@ -1,0 +1,10 @@
+# @package pipeline
+name: sommelier
+
+sample_rate: 16000
+overlap_threshold: 1.0
+speaker_link_threshold: 0.75
+demucs: false
+expected_speakers: 2
+checkpoint: ${env.paths.sepreformer}
+embedding_model: ${env.paths.speechbrain}

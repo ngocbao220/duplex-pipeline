@@ -1,0 +1,7 @@
+# @package benchmark
+check_models: true
+device: auto
+dnsmos_dir: ${env.paths.dnsmos}
+output_dir: outputs/benchmark/${pipeline.name}_${data.source}
+retention_report_md: outputs/data_retention_report.md
+debug: false

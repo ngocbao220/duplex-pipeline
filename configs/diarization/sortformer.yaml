@@ -1,0 +1,10 @@
+# @package diarization
+backend: sortformer
+model: nvidia/diar_streaming_sortformer_4spk-v2.1
+chunk_duration: null
+num_speakers: 2
+speaker_link_threshold: 0.75
+min_duration_seconds: 0.25
+max_chunk_seconds: 120.0
+min_silence_seconds: 0.3
+nemo_log_level: ERROR

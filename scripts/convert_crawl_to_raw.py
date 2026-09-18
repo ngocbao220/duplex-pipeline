@@ -12,15 +12,31 @@ import os
 import tarfile
 import tempfile
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+import sys
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+try:
+    from core.runtime_cpu import enforce_single_cpu_thread
+    enforce_single_cpu_thread()
+except ImportError:
+    pass
 
 
 def convert_audio_to_wav(input_path: Path, output_path: Path) -> bool:
-    """Converts any input audio file to 16kHz Mono PCM WAV using ffmpeg."""
+    """Converts any input audio file to 16kHz Mono PCM WAV using ffmpeg.
+    
+    Uses -threads 1 to strictly limit CPU usage to 1 thread per worker.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg",
         "-y",
+        "-threads", "1",
         "-i",
         str(input_path),
         "-ar",
@@ -41,25 +57,43 @@ def convert_audio_to_wav(input_path: Path, output_path: Path) -> bool:
     return True
 
 
-def process_youtube(crawl_dir: Path, raw_dir: Path):
-    print("=== Processing YouTube crawl ===")
+def process_youtube(crawl_dir: Path, raw_dir: Path, workers: int = 4):
+    print(f"=== Processing YouTube crawl (workers={workers}) ===")
     youtube_crawl = crawl_dir / "youtube"
-    youtube_raw = raw_dir / "youtube"
-    youtube_raw.mkdir(parents=True, exist_ok=True)
+    if not youtube_crawl.exists():
+        print(f"Directory {youtube_crawl} does not exist. Skipping.")
+        return
 
     webm_files = sorted(list(youtube_crawl.glob("*.webm"))) + sorted(
         list(youtube_crawl.glob("*.m4a"))
     )
+    if not webm_files:
+        print(f"No audio files found in {youtube_crawl}. Skipping.")
+        return
+
+    youtube_raw = raw_dir / "youtube"
+    youtube_raw.mkdir(parents=True, exist_ok=True)
     print(f"Found {len(webm_files)} YouTube files in {youtube_crawl}.")
 
-    count = 0
+    tasks = []
     for idx, f in enumerate(webm_files, start=1):
         out_name = f"youtube_{idx}.wav"
         out_path = youtube_raw / out_name
-        print(f"Converting {f.name} -> {out_name}...")
-        if convert_audio_to_wav(f, out_path):
-            count += 1
-            print(f"  -> Created {out_path} ({out_path.stat().st_size} bytes)")
+        tasks.append((f, out_path, out_name))
+
+    def _worker(item):
+        in_f, out_p, name = item
+        ok = convert_audio_to_wav(in_f, out_p)
+        return ok, in_f, out_p, name
+
+    count = 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(_worker, t): t for t in tasks}
+        for future in as_completed(futures):
+            ok, in_f, out_p, name = future.result()
+            if ok:
+                count += 1
+                print(f"  -> Converted {in_f.name} -> {name} ({out_p.stat().st_size} bytes)")
 
     print(
         f"Finished YouTube: {count}/{len(webm_files)} "
@@ -67,15 +101,22 @@ def process_youtube(crawl_dir: Path, raw_dir: Path):
     )
 
 
-def process_podcast_index(crawl_dir: Path, raw_dir: Path):
-    print("=== Processing Podcast Index crawl ===")
+def process_podcast_index(crawl_dir: Path, raw_dir: Path, workers: int = 4):
+    print(f"=== Processing Podcast Index crawl (workers={workers}) ===")
     podcast_crawl = crawl_dir / "podcast_index"
-    podcast_raw = raw_dir / "podcast_index"
-    podcast_raw.mkdir(parents=True, exist_ok=True)
+    if not podcast_crawl.exists():
+        print(f"Directory {podcast_crawl} does not exist. Skipping.")
+        return
 
     tar_files = sorted(list(podcast_crawl.glob("*.tar.gz"))) + sorted(
         list(podcast_crawl.glob("*.tar"))
     )
+    if not tar_files:
+        print(f"No archive files found in {podcast_crawl}. Skipping.")
+        return
+
+    podcast_raw = raw_dir / "podcast_index"
+    podcast_raw.mkdir(parents=True, exist_ok=True)
     print(f"Found {len(tar_files)} tar archives in {podcast_crawl}.")
 
     count = 0
@@ -86,7 +127,6 @@ def process_podcast_index(crawl_dir: Path, raw_dir: Path):
             print(f"Extracting audio from archive {tar_f.name}...")
 
             with tarfile.open(tar_f, "r:*") as tar:
-                # Sort members deterministically by name
                 members = sorted(
                     [
                         m
@@ -97,29 +137,34 @@ def process_podcast_index(crawl_dir: Path, raw_dir: Path):
                     key=lambda m: m.name,
                 )
 
+                extracted_tasks = []
                 for member in members:
                     count += 1
                     out_name = f"podcast_{count}.wav"
                     out_path = podcast_raw / out_name
 
                     extracted_file = tmp_path / Path(member.name).name
-                    with tar.extractfile(member) as src, open(
-                        extracted_file, "wb"
-                    ) as dst:
+                    with tar.extractfile(member) as src, open(extracted_file, "wb") as dst:
                         dst.write(src.read())
 
-                    print(f"Converting {extracted_file.name} -> {out_name}...")
+                    extracted_tasks.append((extracted_file, out_path, out_name))
 
-                    if convert_audio_to_wav(extracted_file, out_path):
-                        print(
-                            f"  -> Created {out_path} "
-                            f"({out_path.stat().st_size} bytes)"
-                        )
-                    else:
-                        count -= 1
+                def _convert_and_cleanup(item):
+                    in_f, out_p, name = item
+                    ok = convert_audio_to_wav(in_f, out_p)
+                    if in_f.exists():
+                        try:
+                            os.remove(in_f)
+                        except Exception:
+                            pass
+                    return ok, name, out_p
 
-                    if extracted_file.exists():
-                        os.remove(extracted_file)
+                with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                    futures = {pool.submit(_convert_and_cleanup, t): t for t in extracted_tasks}
+                    for future in as_completed(futures):
+                        ok, name, out_p = future.result()
+                        if ok:
+                            print(f"  -> Created {out_p} ({out_p.stat().st_size} bytes)")
 
     print(
         f"Finished Podcast Index: {count} mp3 files "
@@ -153,10 +198,30 @@ if __name__ == "__main__":
         default=default_raw_dir,
         help="Path to the root raw output directory",
     )
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=4,
+        help="Number of parallel conversion workers (default: 4)",
+    )
+    parser.add_argument(
+        "--youtube",
+        action="store_true",
+        help="Only process YouTube crawled files",
+    )
+    parser.add_argument(
+        "--podcast-index",
+        action="store_true",
+        help="Only process Podcast Index crawled files",
+    )
 
     args = parser.parse_args()
 
-    process_youtube(args.crawl_dir, args.raw_dir)
-    process_podcast_index(args.crawl_dir, args.raw_dir)
+    run_all = not args.youtube and not args.podcast_index
+    if run_all or args.youtube:
+        process_youtube(args.crawl_dir, args.raw_dir, workers=args.workers)
+    if run_all or args.podcast_index:
+        process_podcast_index(args.crawl_dir, args.raw_dir, workers=args.workers)
 
-    print("Step 1 raw data generation complete!")
+    print("Audio conversion complete!")

@@ -1,0 +1,36 @@
+# @package _global_
+defaults:
+  - env: sever
+  - pipeline: duplexchat
+  - diarization: sortformer
+  - separation: dialoguesidon
+  - benchmark: default
+  - _self_
+
+# Execution controls
+step: all               # Options: all | convert | split_dialogue | separate_dialogue | sommelier | benchmark
+gpu: 2                  # Target GPU ID (e.g. 0, 1, 2 or "0,1")
+debug: false            # Write intermediate debug audio/artifacts
+dry_run: false          # Print execution commands without running
+
+# Dataset & Directory Paths
+data:
+  source: youtube       # Sub-corpus name (e.g. youtube, podcast_index)
+  crawl_dir: ${env.paths.base_data}/crawl
+  raw_dir: ${env.paths.base_data}/raw/${data.source}
+  dialogue_dir: ${env.paths.base_data}/processed/dialogue/${data.source}
+  duplex_out_dir: ${env.paths.base_data}/processed/duplexchat/${data.source}
+  sommelier_out_dir: ${env.paths.base_data}/processed/sommelier/${data.source}
+  pattern: "*.wav"
+
+# Shared Runtime Settings
+runtime:
+  device: auto
+  allow_cpu_fallback: true
+
+# Concurrency & Performance Optimization (Tuned for GPU A100 40GB)
+optimization:
+  workers: 2               # Parallel workers on GPU (A100 40GB supports 2-4 concurrent tasks)
+  convert_workers: 8       # Parallel ffmpeg workers on CPU
+  threads_per_worker: 1    # Enforce strictly 1 CPU thread per worker process (CPU <= 100%)
+

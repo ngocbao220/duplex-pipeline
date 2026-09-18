@@ -1,0 +1,8 @@
+# @package separation
+backend: sepreformer
+model_name: SepReformer_Base_WSJ0
+checkpoint: ${env.paths.sepreformer}
+overlap_threshold_seconds: 1.0
+speaker_embedding_model: ${env.paths.speechbrain}
+speaker_embedding_min_seconds: 0.5
+sample_rate: 16000

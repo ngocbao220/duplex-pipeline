@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -13,6 +14,12 @@ import numpy as np
 import soundfile as sf
 import torch
 import torchaudio
+
+try:
+    from core.runtime_cpu import enforce_single_cpu_thread
+    enforce_single_cpu_thread()
+except ImportError:
+    pass
 
 from .activity import ActivityConfig, activity_summary, config_dict, energy_vad, mask_segments
 from .audio import load_stereo
@@ -126,7 +133,14 @@ def discover_corpus_audio(corpus_dir: Path) -> list[Path]:
     return sorted(candidates)
 
 
-def run_corpus_benchmark(corpus_dir: Path, output_dir: Path, device: str = "auto", debug: bool = False, dnsmos_model_dir: Path | None = Path("models/dnsmos")) -> tuple[dict, Path]:
+def run_corpus_benchmark(
+    corpus_dir: Path,
+    output_dir: Path,
+    device: str = "auto",
+    debug: bool = False,
+    dnsmos_model_dir: Path | None = Path("models/dnsmos"),
+    workers: int = 2,
+) -> tuple[dict, Path]:
     """Benchmark all audio candidates, retaining per-file failures instead of aborting a corpus."""
     started = perf_counter()
     corpus_dir, output_dir = Path(corpus_dir), Path(output_dir)
@@ -134,18 +148,35 @@ def run_corpus_benchmark(corpus_dir: Path, output_dir: Path, device: str = "auto
     output_dir.mkdir(parents=True, exist_ok=True)
     reports, samples, rows = [], [], []
     import tqdm
-    for index, audio_path in enumerate(tqdm.tqdm(candidates, desc="Benchmarking files")):
+
+    def _benchmark_candidate(item):
+        index, audio_path = item
         source = str(audio_path.relative_to(corpus_dir))
         file_dir = output_dir / "files" / f"{index:06d}"
         try:
             report, report_path = run_benchmark(audio_path, file_dir, device, debug, dnsmos_model_dir)
-            reports.append(report)
-            samples.append({"source": source, "status": "ok", "report": str(report_path.relative_to(output_dir))})
-            rows.append(flatten_report(report, source))
+            sample_entry = {"source": source, "status": "ok", "report": str(report_path.relative_to(output_dir))}
+            row_entry = flatten_report(report, source)
+            return report, sample_entry, row_entry
         except Exception as error:
             message = f"{type(error).__name__}: {error}"
-            samples.append({"source": source, "status": "failed", "error": message})
-            rows.append({"source": source, "status": "failed", "error": message})
+            sample_entry = {"source": source, "status": "failed", "error": message}
+            row_entry = {"source": source, "status": "failed", "error": message}
+            return None, sample_entry, row_entry
+
+    indexed_candidates = list(enumerate(candidates))
+    if workers > 1 and len(candidates) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(tqdm.tqdm(pool.map(_benchmark_candidate, indexed_candidates), total=len(candidates), desc="Benchmarking files"))
+    else:
+        results = [_benchmark_candidate(item) for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files")]
+
+    for report, sample_entry, row_entry in results:
+        if report is not None:
+            reports.append(report)
+        samples.append(sample_entry)
+        rows.append(row_entry)
+
     summary = summarize_reports(reports)
     elapsed = perf_counter() - started
     corpus_report = {

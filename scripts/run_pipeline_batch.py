@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from pathlib import Path
 
@@ -16,6 +17,12 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+try:
+    from core.runtime_cpu import enforce_single_cpu_thread
+    enforce_single_cpu_thread()
+except ImportError:
+    pass
 
 from core.model_utils import resolve_local_model_path
 from pipeline.duplexchat.src.duplexchat.model_options import DIARIZATION_MODELS, resolve_model_alias
@@ -82,7 +89,8 @@ def _log_preflight_info(args, input_dir: Path, output_dir: Path) -> None:
         models_to_check.append(("Dialogue Separation (Sidon)", sep_model, "DIALOGUESIDON_MODEL_PATH", "DialogueSidon", req))
 
     elif args.step == "sommelier":
-        models_to_check.append(("SepReformer Checkpoint", os.environ.get("VILIER_SEPREFORMER_CHECKPOINT"), "VILIER_SEPREFORMER_CHECKPOINT", None, None))
+        sepreformer_ckpt = os.environ.get("SEPREFORMER")
+        models_to_check.append(("SepReformer Checkpoint", sepreformer_ckpt, "SEPREFORMER", None, None))
         sort_model = os.environ.get("SORTFORMER_MODEL_PATH") or "nvidia/diar_streaming_sortformer_4spk-v2.1"
         models_to_check.append(("Sortformer Diarization", sort_model, "SORTFORMER_MODEL_PATH", "diar_streaming_sortformer_4spk-v2.1", None))
         models_to_check.append(("Speaker Embedding", "speechbrain/spkrec-ecapa-voxceleb", "SPEECHBRAIN_MODEL_PATH", "spkrec-ecapa-voxceleb", None))
@@ -247,6 +255,8 @@ def run_batch():
                         help="Chunk duration in seconds for dialogue separation (default: 120.0).")
     parser.add_argument("--separation-model", type=Path, default=None,
                         help="Verified local DialogueSidon model directory passed to every separation process.")
+    parser.add_argument("--workers", "-w", type=int, default=2,
+                        help="Number of parallel worker processes to saturate GPU (default: 2 for A100 40GB).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print executable commands without running them.")
     args = parser.parse_args()
@@ -257,7 +267,16 @@ def run_batch():
 
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not input_dir.exists():
+        print(f"[INFO] Input directory does not exist: {input_dir}. Skipping step {args.step}.")
+        return
+
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"[WARNING] Could not create output directory {output_dir}: {e}. Skipping step {args.step}.")
+        return
 
     _log_preflight_info(args, input_dir, output_dir)
 
@@ -270,6 +289,7 @@ def run_batch():
     env["OPENBLAS_NUM_THREADS"] = "1"
     env["VECLIB_MAXIMUM_THREADS"] = "1"
     env["NUMEXPR_NUM_THREADS"] = "1"
+    env["TORCH_NUM_THREADS"] = "1"
     # When CUDA_VISIBLE_DEVICES is set, CUDA devices are re-indexed starting from 0 inside the process
     num_gpus = len([g for g in gpu_str.split(",") if g.strip()])
     inner_device_ids = [str(i) for i in range(num_gpus)]
@@ -280,59 +300,92 @@ def run_batch():
             print(f"No files matching '{args.pattern}' found in {input_dir}")
             return
 
-        print(f"=== Running split_dialogue on {len(wav_files)} files from {input_dir} (GPU {args.gpu}) ===")
-        for idx, wav in enumerate(wav_files, start=1):
-            sub_out = output_dir / wav.stem
-            filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
-            cmd = [
-                sys.executable, "-m", "duplexchat", "split_valid_dialogue",
-                "--input", str(wav),
-                "--output-dir", str(sub_out),
-                "--device-ids", *inner_device_ids,
-                filter_flag
-            ]
-            if args.lid:
-                cmd.extend(["--lid", args.lid])
-            if args.diarization_backend:
-                cmd.extend(["--diarization-backend", args.diarization_backend])
-            if args.diarization_model:
-                cmd.extend(["--diarization-model", args.diarization_model])
-            print(f"[{idx}/{len(wav_files)}] {wav.name} -> {sub_out.name}")
-            if args.dry_run:
+        print(f"=== Running split_dialogue on {len(wav_files)} files from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
+        if args.dry_run:
+            for idx, wav in enumerate(wav_files, start=1):
+                sub_out = output_dir / wav.stem
+                filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
+                cmd = [
+                    sys.executable, "-m", "duplexchat", "split_valid_dialogue",
+                    "--input", str(wav),
+                    "--output-dir", str(sub_out),
+                    "--device-ids", *inner_device_ids,
+                    filter_flag
+                ]
+                if args.lid:
+                    cmd.extend(["--lid", args.lid])
+                if args.diarization_backend:
+                    cmd.extend(["--diarization-backend", args.diarization_backend])
+                if args.diarization_model:
+                    cmd.extend(["--diarization-model", args.diarization_model])
+                print(f"[{idx}/{len(wav_files)}] {wav.name} -> {sub_out.name}")
                 print("  Command:", " ".join(cmd))
-            else:
+        else:
+            def _process_one_wav(item):
+                idx, wav = item
+                sub_out = output_dir / wav.stem
+                filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
+                cmd = [
+                    sys.executable, "-m", "duplexchat", "split_valid_dialogue",
+                    "--input", str(wav),
+                    "--output-dir", str(sub_out),
+                    "--device-ids", *inner_device_ids,
+                    filter_flag
+                ]
+                if args.lid:
+                    cmd.extend(["--lid", args.lid])
+                if args.diarization_backend:
+                    cmd.extend(["--diarization-backend", args.diarization_backend])
+                if args.diarization_model:
+                    cmd.extend(["--diarization-model", args.diarization_model])
+                print(f"[{idx}/{len(wav_files)}] {wav.name} -> {sub_out.name}")
                 timing = _timed_subprocess(cmd, wav, sub_out, env)
-                timing_items.append(timing)
                 if timing["exit_code"] != 0:
                     print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
+                return timing
+
+            with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                timing_items = list(pool.map(_process_one_wav, enumerate(wav_files, start=1)))
 
     elif args.step == "separate_dialogue":
         # Can take a directory containing dialogue subfolders or direct dialogue files
         subdirs = sorted([d for d in input_dir.iterdir() if d.is_dir()])
         if not subdirs:
-            # Check if input_dir itself has dialogue_*.wav
             if list(input_dir.glob("dialogue_*.wav")):
                 subdirs = [input_dir]
             else:
                 print(f"No dialogue subdirectories or files found in {input_dir}")
                 return
 
-        print(f"=== Running separate_dialogue on {len(subdirs)} dialogue folders from {input_dir} (GPU {args.gpu}) ===")
-        for idx, sdir in enumerate(subdirs, start=1):
-            sub_out = output_dir / sdir.name
-            cmd = [
-                sys.executable, "-m", "duplexchat", "separate_dialogue",
-                "--input", str(sdir),
-                "--output-dir", str(sub_out),
-                "--device-ids", *inner_device_ids,
-                "--separation-chunk", str(args.separation_chunk)
-            ]
-            if args.separation_model:
-                cmd.extend(["--separation-model", str(args.separation_model.resolve())])
-            print(f"[{idx}/{len(subdirs)}] {sdir.name} -> {sub_out.name}")
-            if args.dry_run:
+        print(f"=== Running separate_dialogue on {len(subdirs)} dialogue folders from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
+        if args.dry_run:
+            for idx, sdir in enumerate(subdirs, start=1):
+                sub_out = output_dir / sdir.name
+                cmd = [
+                    sys.executable, "-m", "duplexchat", "separate_dialogue",
+                    "--input", str(sdir),
+                    "--output-dir", str(sub_out),
+                    "--device-ids", *inner_device_ids,
+                    "--separation-chunk", str(args.separation_chunk)
+                ]
+                if args.separation_model:
+                    cmd.extend(["--separation-model", str(args.separation_model.resolve())])
+                print(f"[{idx}/{len(subdirs)}] {sdir.name} -> {sub_out.name}")
                 print("  Command:", " ".join(cmd))
-            else:
+        else:
+            def _process_one_subdir(item):
+                idx, sdir = item
+                sub_out = output_dir / sdir.name
+                cmd = [
+                    sys.executable, "-m", "duplexchat", "separate_dialogue",
+                    "--input", str(sdir),
+                    "--output-dir", str(sub_out),
+                    "--device-ids", *inner_device_ids,
+                    "--separation-chunk", str(args.separation_chunk)
+                ]
+                if args.separation_model:
+                    cmd.extend(["--separation-model", str(args.separation_model.resolve())])
+                print(f"[{idx}/{len(subdirs)}] {sdir.name} -> {sub_out.name}")
                 source_files = sorted(sdir.glob("dialogue_*.wav"))
                 source = source_files[0] if len(source_files) == 1 else sdir
                 timing = _timed_subprocess(cmd, source, sub_out, env)
@@ -342,9 +395,12 @@ def run_batch():
                     timing["audio_seconds"] = audio_seconds or None
                     timing["real_time_factor"] = timing["elapsed_seconds"] / audio_seconds if audio_seconds else None
                     timing["audio_seconds_per_wall_second"] = audio_seconds / timing["elapsed_seconds"] if audio_seconds and timing["elapsed_seconds"] else None
-                timing_items.append(timing)
                 if timing["exit_code"] != 0:
                     print(f"Error processing {sdir.name} (exit code {timing['exit_code']})")
+                return timing
+
+            with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                timing_items = list(pool.map(_process_one_subdir, enumerate(subdirs, start=1)))
 
     elif args.step == "sommelier":
         def _dialogue_key(p: Path) -> int:
@@ -353,32 +409,56 @@ def run_batch():
 
         subdirs = sorted([d for d in input_dir.iterdir() if d.is_dir()])
         if subdirs:
-            print(f"=== Running Sommelier on {len(subdirs)} dialogue folders from {input_dir} (GPU {args.gpu}) ===")
-            for idx, sdir in enumerate(subdirs, start=1):
-                sub_out = output_dir / sdir.name
-                sub_out.mkdir(parents=True, exist_ok=True)
-                dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
-                if not dialogue_files:
-                    dialogue_files = sorted(list(sdir.glob(args.pattern)))
-                if not dialogue_files:
-                    print(f"[{idx}/{len(subdirs)}] No audio clips found in {sdir.name}")
-                    continue
-
-                print(f"[{idx}/{len(subdirs)}] {sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
-                for d_idx, dwav in enumerate(dialogue_files, start=1):
-                    cmd = [
-                        sys.executable, "-m", "sommelier", "single",
-                        "--input", str(dwav),
-                        "--output-dir", str(sub_out)
-                    ]
-                    print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
-                    if args.dry_run:
+            print(f"=== Running Sommelier on {len(subdirs)} dialogue folders from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
+            if args.dry_run:
+                for idx, sdir in enumerate(subdirs, start=1):
+                    sub_out = output_dir / sdir.name
+                    dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
+                    if not dialogue_files:
+                        dialogue_files = sorted(list(sdir.glob(args.pattern)))
+                    if not dialogue_files:
+                        print(f"[{idx}/{len(subdirs)}] No audio clips found in {sdir.name}")
+                        continue
+                    print(f"[{idx}/{len(subdirs)}] {sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
+                    for d_idx, dwav in enumerate(dialogue_files, start=1):
+                        cmd = [
+                            sys.executable, "-m", "sommelier", "single",
+                            "--input", str(dwav),
+                            "--output-dir", str(sub_out)
+                        ]
+                        print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
                         print("    Command:", " ".join(cmd))
-                    else:
+            else:
+                def _process_sommelier_subdir(item):
+                    idx, sdir = item
+                    sub_out = output_dir / sdir.name
+                    sub_out.mkdir(parents=True, exist_ok=True)
+                    dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
+                    if not dialogue_files:
+                        dialogue_files = sorted(list(sdir.glob(args.pattern)))
+                    if not dialogue_files:
+                        print(f"[{idx}/{len(subdirs)}] No audio clips found in {sdir.name}")
+                        return []
+
+                    print(f"[{idx}/{len(subdirs)}] {sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
+                    sub_timings = []
+                    for d_idx, dwav in enumerate(dialogue_files, start=1):
+                        cmd = [
+                            sys.executable, "-m", "sommelier", "single",
+                            "--input", str(dwav),
+                            "--output-dir", str(sub_out)
+                        ]
+                        print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
                         timing = _timed_subprocess(cmd, dwav, sub_out, env)
-                        timing_items.append(timing)
+                        sub_timings.append(timing)
                         if timing["exit_code"] != 0:
                             print(f"Error processing {dwav.name} (exit code {timing['exit_code']})")
+                    return sub_timings
+
+                with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                    results = list(pool.map(_process_sommelier_subdir, enumerate(subdirs, start=1)))
+                    for r in results:
+                        timing_items.extend(r)
         else:
             dialogue_files = sorted(list(input_dir.glob("dialogue_*.wav")), key=_dialogue_key)
             if not dialogue_files:
@@ -387,23 +467,35 @@ def run_batch():
                 print(f"No files matching '{args.pattern}' found in {input_dir}")
                 return
 
-            print(f"=== Running Sommelier on {len(dialogue_files)} files from {input_dir} (GPU {args.gpu}) ===")
-            for idx, wav in enumerate(dialogue_files, start=1):
-                sub_out = output_dir / wav.stem
-                sub_out.mkdir(parents=True, exist_ok=True)
-                cmd = [
-                    sys.executable, "-m", "sommelier", "single",
-                    "--input", str(wav),
-                    "--output-dir", str(sub_out)
-                ]
-                print(f"[{idx}/{len(dialogue_files)}] {wav.name} -> {sub_out.name}")
-                if args.dry_run:
+            print(f"=== Running Sommelier on {len(dialogue_files)} files from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
+            if args.dry_run:
+                for idx, wav in enumerate(dialogue_files, start=1):
+                    sub_out = output_dir / wav.stem
+                    cmd = [
+                        sys.executable, "-m", "sommelier", "single",
+                        "--input", str(wav),
+                        "--output-dir", str(sub_out)
+                    ]
+                    print(f"[{idx}/{len(dialogue_files)}] {wav.name} -> {sub_out.name}")
                     print("  Command:", " ".join(cmd))
-                else:
+            else:
+                def _process_sommelier_single(item):
+                    idx, wav = item
+                    sub_out = output_dir / wav.stem
+                    sub_out.mkdir(parents=True, exist_ok=True)
+                    cmd = [
+                        sys.executable, "-m", "sommelier", "single",
+                        "--input", str(wav),
+                        "--output-dir", str(sub_out)
+                    ]
+                    print(f"[{idx}/{len(dialogue_files)}] {wav.name} -> {sub_out.name}")
                     timing = _timed_subprocess(cmd, wav, sub_out, env)
-                    timing_items.append(timing)
                     if timing["exit_code"] != 0:
                         print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
+                    return timing
+
+                with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                    timing_items = list(pool.map(_process_sommelier_single, enumerate(dialogue_files, start=1)))
 
 
     if not args.dry_run:

@@ -105,10 +105,21 @@ def test_sommelier_runner_stops_after_the_two_track_stage():
     assert "def constrain_speaker_inventory(" in vendor
 
 
-def test_vilier_sortformer_honors_the_configured_two_speaker_inventory():
-    root = Path(__file__).resolve().parents[1]
-    target_file = root / "pipeline" / "vilier" / "src" / "vilier" / "diarization.py"
-    if target_file.exists():
-        source = target_file.read_text()
-        assert "if total > 1 or self.num_speakers is not None:" in source
-        assert "_constrain_global_speakers(labels, embeddings_list, self.num_speakers)" in source
+def test_shared_config_loads_yaml(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+runtime:
+  device: cpu
+  allow_cpu_fallback: true
+separation:
+  num_steps: 12
+cholimex:
+  overlap_padding: 0.15
+"""
+    )
+    config = load_config(path)
+    assert config.runtime_device == "cpu"
+    assert config.separation_num_steps == 12
+    assert config.cholimex_overlap_padding == 0.15
+

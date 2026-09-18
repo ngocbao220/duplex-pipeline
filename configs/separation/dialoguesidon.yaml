@@ -1,0 +1,6 @@
+# @package separation
+backend: dialoguesidon
+model: ${env.paths.dialoguesidon}
+chunk_seconds: 60.0
+num_steps: 30
+sample_rate: 24000

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# sommelier.sh — Bước 2: Tách âm và tái tạo stereo bằng Sommelier (SepReformer)
+# dialogue_split.sh — Bước 1: Tiền xử lý & Lọc cuộc thoại hai người (Dialogue Filtering)
 #
 # Cách dùng:
-#   bash sommelier.sh --youtube                   # Chạy cho folder YouTube (mặc định)
-#   bash sommelier.sh --podcast-index             # Chạy cho folder Podcast Index
-#   bash sommelier.sh --all                       # Chạy tuần tự cho cả hai nguồn
-#   bash sommelier.sh --youtube --gpu 0           # Chỉ định GPU 0
-#   bash sommelier.sh --youtube --dev             # Chế độ Dev online
-#   bash sommelier.sh --youtube --dry-run         # Chạy thử
+#   bash dialogue_split.sh --youtube                   # Chạy cho folder YouTube (mặc định)
+#   bash dialogue_split.sh --podcast-index             # Chạy cho folder Podcast Index
+#   bash dialogue_split.sh --all                       # Chạy tuần tự cho cả hai nguồn
+#   bash dialogue_split.sh --youtube --gpu 0           # Chỉ định GPU 0
+#   bash dialogue_split.sh --youtube --dev             # Chạy chế độ Dev (online)
+#   bash dialogue_split.sh --youtube --dry-run         # Chạy thử (không ghi dữ liệu)
 
 set -euo pipefail
 
@@ -59,6 +59,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Mặc định là youtube nếu không chỉ định nguồn nào
+if [[ ${#SOURCES[@]} -eq 0 ]]; then
+    SOURCES=("youtube")
+fi
+
 # Resolve Python interpreter (prioritize duplex-pipelines conda env or local .venv over base)
 if [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
     PYTHON="${CONDA_PREFIX}/bin/python"
@@ -73,11 +78,10 @@ fi
 
 for SRC in "${SOURCES[@]}"; do
     echo "======================================================================"
-    echo " [Phase 2 - Sommelier] Separate & Reconstruct | Source: [${SRC}] | GPU: [${GPU_ID}]"
+    echo " [Phase 1] Split Dialogue | Source: [${SRC}] | GPU: [${GPU_ID}]"
     echo "======================================================================"
     "$PYTHON" "$PROJECT_ROOT/run_pipeline.py" \
-        step=sommelier \
-        pipeline=sommelier \
+        step=split_dialogue \
         env="$MODE" \
         gpu="$GPU_ID" \
         data.source="$SRC" \

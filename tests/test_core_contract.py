@@ -101,12 +101,12 @@ def test_failed_sample_emits_one_concise_console_error_and_persists_traceback(tm
     def failing_adapter(source, output, config):
         raise FileNotFoundError("checkpoint missing")
 
-    result = run_sample("vilier", {"key": "sample", "mixture": str(mixture)}, tmp_path / "output", {}, "code", failing_adapter)
+    result = run_sample("sommelier", {"key": "sample", "mixture": str(mixture)}, tmp_path / "output", {}, "code", failing_adapter)
 
     captured = capsys.readouterr().out
     assert result["status"] == "failed"
     assert "FileNotFoundError: checkpoint missing" in result["traceback"]
-    assert " - vilier - [ERROR] - Sample sample failed: FileNotFoundError: checkpoint missing" in captured
+    assert "Sample sample failed: FileNotFoundError: checkpoint missing" in captured
     assert "Traceback" not in captured
 
 

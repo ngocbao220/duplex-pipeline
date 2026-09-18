@@ -76,6 +76,31 @@ def apply_config_data(cfg: Config, data: dict[str, Any]) -> Config:
     return cfg
 
 
-def load_config(path: Path = Path("configs/config.json")) -> Config:
-    with Path(path).open("r", encoding="utf-8") as handle:
+def load_config(path: Path | str = Path("configs/config.json")) -> Config:
+    path_obj = Path(path)
+    if path_obj.suffix in {".yaml", ".yml"}:
+        try:
+            from omegaconf import OmegaConf
+            raw_data = OmegaConf.to_container(OmegaConf.load(path_obj), resolve=True)
+        except ImportError:
+            import yaml
+            with path_obj.open("r", encoding="utf-8") as handle:
+                raw_data = yaml.safe_load(handle)
+        return apply_config_data(Config(), raw_data)
+
+    with path_obj.open("r", encoding="utf-8") as handle:
         return apply_config_data(Config(), json.load(handle))
+
+
+def config_from_omegaconf(cfg_dict: Any) -> Config:
+    """Convert an OmegaConf DictConfig or dict to a Config dataclass."""
+    try:
+        from omegaconf import OmegaConf, DictConfig
+        if isinstance(cfg_dict, DictConfig):
+            data = OmegaConf.to_container(cfg_dict, resolve=True)
+        else:
+            data = dict(cfg_dict)
+    except ImportError:
+        data = dict(cfg_dict)
+    return apply_config_data(Config(), data)
+
