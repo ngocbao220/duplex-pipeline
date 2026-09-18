@@ -163,27 +163,38 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
         ) from exc
 
     def _patch_sortformer_modules():
-        """Monkey-patch all classes in sortformer_modules to ignore unknown kwargs like spkcache_len."""
+        """Monkey-patch all classes in sortformer_modules and sortformer models to filter any unknown kwargs."""
         try:
             import inspect
             from nemo.collections.asr.modules import sortformer_modules
-            for attr_name in dir(sortformer_modules):
-                cls = getattr(sortformer_modules, attr_name)
-                if isinstance(cls, type) and not getattr(cls, "_spkcache_patched", False):
-                    orig_init = cls.__init__
-                    try:
-                        sig = inspect.signature(orig_init)
-                        accepts_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-                        if not accepts_varkw and "spkcache_len" not in sig.parameters:
-                            def make_patched(original):
-                                def patched(self, *args, **kwargs):
-                                    kwargs.pop("spkcache_len", None)
-                                    return original(self, *args, **kwargs)
-                                return patched
-                            cls.__init__ = make_patched(orig_init)
-                            cls._spkcache_patched = True
-                    except (ValueError, TypeError):
-                        pass
+            from nemo.collections.asr.models import sortformer_diar_models
+
+            modules_to_patch = [sortformer_modules, sortformer_diar_models]
+            try:
+                from nemo.collections.asr.models import sortformer_models
+                modules_to_patch.append(sortformer_models)
+            except Exception:
+                pass
+
+            for mod in modules_to_patch:
+                for attr_name in dir(mod):
+                    cls = getattr(mod, attr_name)
+                    if isinstance(cls, type) and not getattr(cls, "_kwargs_filter_patched", False):
+                        orig_init = cls.__init__
+                        try:
+                            sig = inspect.signature(orig_init)
+                            accepts_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                            if not accepts_varkw:
+                                allowed_params = set(sig.parameters.keys())
+                                def make_patched(original, allowed):
+                                    def patched(self, *args, **kwargs):
+                                        safe_kwargs = {k: v for k, v in kwargs.items() if k in allowed}
+                                        return original(self, *args, **safe_kwargs)
+                                    return patched
+                                cls.__init__ = make_patched(orig_init, allowed_params)
+                                cls._kwargs_filter_patched = True
+                        except (ValueError, TypeError):
+                            pass
         except Exception:
             pass
 
@@ -210,19 +221,20 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
             pass
 
     def _restore(path_str: str):
-        """Load .nemo với fallback patch spkcache_len nếu NeMo version cũ không nhận.
+        """Load .nemo với fallback patch nếu NeMo version cũ không nhận tham số mới.
 
         Lỗi thường bị wrap trong Hydra/OmegaConf nên phải kiểm tra toàn bộ exception chain.
         """
         _patch_sortformer_modules()
 
-        def _has_spkcache_err(exc: BaseException) -> bool:
-            """Đệ quy kiểm tra exception chain có chứa spkcache_len không."""
+        def _has_unsupported_err(exc: BaseException) -> bool:
+            """Đệ quy kiểm tra exception chain có chứa lỗi unexpected keyword argument không."""
             seen = set()
             e: BaseException | None = exc
             while e is not None and id(e) not in seen:
                 seen.add(id(e))
-                if "spkcache_len" in str(e):
+                msg = str(e)
+                if "unexpected keyword argument" in msg or "spkcache_len" in msg or "fifo_len" in msg:
                     return True
                 e = e.__cause__ or e.__context__
             return False
@@ -230,9 +242,9 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
         try:
             return SortformerEncLabelModel.restore_from(path_str)
         except Exception as e:  # noqa: BLE001
-            if not _has_spkcache_err(e):
+            if not _has_unsupported_err(e):
                 raise
-            # NeMo < 2.3 không có spkcache_len — patch bằng cách strip khỏi config YAML
+            # NeMo version cũ không nhận tham số mới — patch bằng cách strip khỏi config YAML
             import tarfile
             import tempfile
             from omegaconf import OmegaConf
@@ -249,16 +261,17 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
                 cfg_file = next(tmp_path.rglob("model_config.yaml"), None)
                 if cfg_file is None:
                     raise RuntimeError(
-                        "spkcache_len patch failed: model_config.yaml not found in .nemo archive. "
+                        "Sortformer config patch failed: model_config.yaml not found in .nemo archive. "
                         "Please upgrade NeMo: pip install 'nemo_toolkit[asr]>=2.3.0'"
                     ) from e
                 cfg = OmegaConf.load(cfg_file)
-                # Xóa spkcache_len và bất kỳ key lạ nào khỏi sortformer_modules
+                # Xóa các key mới khỏi sortformer_modules
                 try:
                     sm_node = OmegaConf.select(cfg, "model.sortformer_modules")
                     if sm_node is not None:
                         sm_dict = OmegaConf.to_container(sm_node, resolve=False)
-                        sm_dict.pop("spkcache_len", None)
+                        for k in ["spkcache_len", "fifo_len", "chunk_len", "total_buffer_in_secs"]:
+                            sm_dict.pop(k, None)
                         OmegaConf.update(cfg, "model.sortformer_modules", sm_dict, merge=False)
                 except Exception:
                     pass
@@ -270,6 +283,7 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
                         if f != patched and f.is_file():
                             tar.add(f, arcname=str(f.relative_to(tmp_path)))
                 return SortformerEncLabelModel.restore_from(str(patched))
+
 
     if target_path.is_file() and target_str.endswith(".nemo"):
         diar_model = _restore(target_str)
