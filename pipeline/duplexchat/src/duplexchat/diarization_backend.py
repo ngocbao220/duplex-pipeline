@@ -10,13 +10,40 @@ from pathlib import Path
 import re
 from typing import TYPE_CHECKING, Any, Protocol
 
+import logging
 import os
+import warnings
+
 os.environ["MPLBACKEND"] = "Agg"
+
+# Suppress noisy third-party warnings before any heavy imports
+warnings.filterwarnings("ignore", category=SyntaxWarning, module="pydub")
+warnings.filterwarnings("ignore", message=".*Migrating your old cache.*")
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 try:
     import matplotlib
     matplotlib.use("Agg")
 except Exception:
     pass
+
+
+def _suppress_nemo_logs() -> None:
+    """Tắt NeMo W/I logs không liên quan đến lỗi thực sự."""
+    for name in (
+        "nemo_logging",
+        "nemo",
+        "nemo.collections",
+        "nemo.core",
+        "nemo.utils",
+        "pytorch_lightning",
+        "lightning",
+        "transformers.utils.hub",
+        "transformers.configuration_utils",
+        "huggingface_hub.utils",
+    ):
+        logging.getLogger(name).setLevel(logging.ERROR)
 
 import torch
 import torch.nn.functional as F
@@ -125,12 +152,14 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
     local_target, is_local = resolve_local_model_path(
         model, env_var="SORTFORMER_MODEL_PATH", default_subpath="diar_streaming_sortformer_4spk-v2.1"
     )
+    _suppress_nemo_logs()
+
     try:
         from nemo.collections.asr.models import SortformerEncLabelModel
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
             f"Sortformer diarization requires NVIDIA NeMo (nemo_toolkit[asr]). "
-            f"Import failed with error: {exc}. Please install requirements: pip install nemo_toolkit[asr]"
+            f"Import failed with error: {exc}. Please install: pip install nemo_toolkit[asr]"
         ) from exc
 
     target_path = Path(local_target)
@@ -141,20 +170,57 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
         )
 
     target_str = str(local_target)
+
+    def _restore(path_str: str):
+        """Load .nemo với fallback patch spkcache_len nếu NeMo version cũ không nhận."""
+        try:
+            return SortformerEncLabelModel.restore_from(path_str)
+        except TypeError as e:
+            if "spkcache_len" not in str(e):
+                raise
+            # NeMo < 2.3 không có spkcache_len — patch bằng cách strip khỏi config
+            import tarfile, tempfile, json, yaml, shutil
+            from omegaconf import OmegaConf
+            with tempfile.TemporaryDirectory(prefix="nemo_patch_") as tmp:
+                tmp_path = Path(tmp)
+                with tarfile.open(path_str, "r") as tar:
+                    tar.extractall(tmp_path)
+                # Tìm model_config.yaml
+                cfg_file = next(tmp_path.rglob("model_config.yaml"), None)
+                if cfg_file is None:
+                    raise
+                cfg = OmegaConf.load(cfg_file)
+                # Xóa spkcache_len khỏi sortformer_modules nếu có
+                try:
+                    sm = cfg.model.sortformer_modules
+                    if hasattr(sm, "spkcache_len"):
+                        OmegaConf.update(cfg, "model.sortformer_modules", 
+                                         {k: v for k, v in OmegaConf.to_container(sm).items() if k != "spkcache_len"})
+                except Exception:
+                    pass
+                OmegaConf.save(cfg, cfg_file)
+                # Đóng gói lại thành .nemo tạm
+                patched = tmp_path / "patched.nemo"
+                with tarfile.open(patched, "w:gz") as tar:
+                    for f in tmp_path.rglob("*"):
+                        if f != patched and f.is_file():
+                            tar.add(f, arcname=f.relative_to(tmp_path))
+                return SortformerEncLabelModel.restore_from(str(patched))
+
     if target_path.is_file() and target_str.endswith(".nemo"):
-        diar_model = SortformerEncLabelModel.restore_from(target_str)
+        diar_model = _restore(target_str)
     elif target_path.is_dir():
         nemo_files = list(target_path.glob("*.nemo"))
         if nemo_files:
-            diar_model = SortformerEncLabelModel.restore_from(str(nemo_files[0]))
+            diar_model = _restore(str(nemo_files[0]))
         else:
             try:
-                diar_model = SortformerEncLabelModel.restore_from(target_str)
+                diar_model = _restore(target_str)
             except Exception:
                 diar_model = SortformerEncLabelModel.from_pretrained(target_str)
     else:
         try:
-            diar_model = SortformerEncLabelModel.restore_from(target_str)
+            diar_model = _restore(target_str)
         except Exception:
             diar_model = SortformerEncLabelModel.from_pretrained(target_str)
 
