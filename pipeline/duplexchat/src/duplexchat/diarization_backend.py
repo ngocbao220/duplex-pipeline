@@ -162,6 +162,33 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
             f"Import failed with error: {exc}. Please install: pip install nemo_toolkit[asr]"
         ) from exc
 
+    def _patch_sortformer_modules():
+        """Monkey-patch all classes in sortformer_modules to ignore unknown kwargs like spkcache_len."""
+        try:
+            import inspect
+            from nemo.collections.asr.modules import sortformer_modules
+            for attr_name in dir(sortformer_modules):
+                cls = getattr(sortformer_modules, attr_name)
+                if isinstance(cls, type) and not getattr(cls, "_spkcache_patched", False):
+                    orig_init = cls.__init__
+                    try:
+                        sig = inspect.signature(orig_init)
+                        accepts_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                        if not accepts_varkw and "spkcache_len" not in sig.parameters:
+                            def make_patched(original):
+                                def patched(self, *args, **kwargs):
+                                    kwargs.pop("spkcache_len", None)
+                                    return original(self, *args, **kwargs)
+                                return patched
+                            cls.__init__ = make_patched(orig_init)
+                            cls._spkcache_patched = True
+                    except (ValueError, TypeError):
+                        pass
+        except Exception:
+            pass
+
+    _patch_sortformer_modules()
+
     target_path = Path(local_target)
     if is_offline_mode() and not is_local and not target_path.exists():
         assert_local_model_exists(
@@ -171,11 +198,24 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
 
     target_str = str(local_target)
 
+    # Nếu target_str là HF repo ID và chưa phải file local, tải file .nemo từ HF Hub
+    if not target_path.is_file() and not is_offline_mode() and "/" in target_str:
+        try:
+            from huggingface_hub import hf_hub_download
+            nemo_filename = "diar_streaming_sortformer_4spk-v2.1.nemo"
+            downloaded = hf_hub_download(repo_id=target_str, filename=nemo_filename)
+            target_str = downloaded
+            target_path = Path(downloaded)
+        except Exception:
+            pass
+
     def _restore(path_str: str):
         """Load .nemo với fallback patch spkcache_len nếu NeMo version cũ không nhận.
 
         Lỗi thường bị wrap trong Hydra/OmegaConf nên phải kiểm tra toàn bộ exception chain.
         """
+        _patch_sortformer_modules()
+
         def _has_spkcache_err(exc: BaseException) -> bool:
             """Đệ quy kiểm tra exception chain có chứa spkcache_len không."""
             seen = set()
@@ -254,6 +294,7 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
     if hasattr(diar_model, "to"):
         diar_model.to(torch.device(resolved_device))
     return SortformerDiarizationAdapter(diar_model)
+
 
 
 def _load_diarizen_pipeline(model: str, device: str = "cuda") -> DiariZenDiarizationAdapter:
