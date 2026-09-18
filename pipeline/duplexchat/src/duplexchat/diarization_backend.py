@@ -93,19 +93,82 @@ def _disable_sortformer_streaming_mode(model: Any) -> None:
 class SortformerDiarizationAdapter(FileDiarizationAdapter):
     backend = "sortformer"
 
-    def __init__(self, model: Any):
+    def __init__(self, model: Any, max_chunk_duration: float = 120.0):
         self.model = model
+        self.max_chunk_duration = max_chunk_duration
+
+    def _diarize_single(self, wav_path_str: str) -> list[dict]:
+        with torch.inference_mode():
+            try:
+                predicted = self.model.diarize(audio=wav_path_str, batch_size=1)
+            except NotImplementedError as exc:
+                if "Streaming mode is not implemented" in str(exc):
+                    _disable_sortformer_streaming_mode(self.model)
+                    predicted = self.model.diarize(audio=wav_path_str, batch_size=1)
+                else:
+                    raise
+        return _segments_from_sortformer_output(predicted)
 
     def diarize_file(self, wav_path: Path) -> list[dict]:
+        import soundfile as sf
+        import tempfile
+
         try:
-            predicted = self.model.diarize(audio=str(wav_path), batch_size=1)
-        except NotImplementedError as exc:
-            if "Streaming mode is not implemented" in str(exc):
-                _disable_sortformer_streaming_mode(self.model)
-                predicted = self.model.diarize(audio=str(wav_path), batch_size=1)
+            info = sf.info(str(wav_path))
+            duration = info.duration
+            sample_rate = info.samplerate
+        except Exception:
+            duration = None
+            sample_rate = 16000
+
+        # Nếu audio ngắn hơn max_chunk_duration (<= 120s), diarize trực tiếp
+        if duration is not None and duration <= self.max_chunk_duration:
+            return self._diarize_single(str(wav_path))
+
+        # Audio dài (> 120s): xử lý theo chunk 120s để triệt tiêu hoàn toàn nguy cơ CUDA OOM
+        segments: list[dict] = []
+        chunk_samples = int(self.max_chunk_duration * sample_rate)
+
+        with tempfile.TemporaryDirectory(prefix="sortformer_chunk_") as tmpdir:
+            tmp_dir_path = Path(tmpdir)
+            with sf.SoundFile(str(wav_path)) as f:
+                offset_samples = 0
+                chunk_idx = 0
+                while offset_samples < f.frames:
+                    f.seek(offset_samples)
+                    chunk_data = f.read(chunk_samples)
+                    if len(chunk_data) == 0:
+                        break
+
+                    offset_sec = offset_samples / sample_rate
+                    chunk_file = tmp_dir_path / f"chunk_{chunk_idx:04d}.wav"
+                    sf.write(str(chunk_file), chunk_data, sample_rate)
+
+                    chunk_segs = self._diarize_single(str(chunk_file))
+                    for seg in chunk_segs:
+                        seg["start"] = round(seg["start"] + offset_sec, 3)
+                        seg["end"] = round(seg["end"] + offset_sec, 3)
+                        segments.append(seg)
+
+                    offset_samples += chunk_samples
+                    chunk_idx += 1
+
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+        # Ghép các segment liền kề cùng speaker bị cắt ngang ở biên chunk
+        segments.sort(key=lambda x: x["start"])
+        merged: list[dict] = []
+        for seg in segments:
+            if (
+                merged
+                and merged[-1]["speaker"] == seg["speaker"]
+                and abs(seg["start"] - merged[-1]["end"]) < 0.25
+            ):
+                merged[-1]["end"] = max(merged[-1]["end"], seg["end"])
             else:
-                raise
-        return _segments_from_sortformer_output(predicted)
+                merged.append(seg)
+        return merged
 
 
 class DiariZenDiarizationAdapter(FileDiarizationAdapter):
