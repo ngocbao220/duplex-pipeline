@@ -13,8 +13,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
+from core.orchestration.logging_style import get_logger, section  # noqa: E402
+
 
 def run(source: Path, output: Path, config: dict):
+    logger = get_logger("sommelier")
     token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         raise RuntimeError("Sommelier requires HUGGINGFACE_TOKEN for pyannote diarization and embedding")
@@ -24,6 +28,13 @@ def run(source: Path, output: Path, config: dict):
     input_dir.mkdir(parents=True, exist_ok=True)
     copied = input_dir / source.name
     shutil.copy2(source, copied)
+
+    # ===== Section header theo logging.md =====
+    print(section("Sommelier"))
+    logger.info("Input  : %s", source)
+    logger.info("Output : %s", output)
+    logger.info("")
+
     cfg = {
         "huggingface_token": token,
         "language": {"multilingual": False, "supported": ["en", "ko", "ja", "zh", "es", "fr", "de", "it", "pt", "ru", "ar", "hi"]},
@@ -37,6 +48,12 @@ def run(source: Path, output: Path, config: dict):
     else:
         env["SOMMELIER_LOG_LEVEL"] = env.get("SOMMELIER_LOG_LEVEL", "INFO")
 
+    logger.info("Overlap detection : Diarization by \"sortformer\" (load from %s)",
+                os.environ.get("DUPLEX_MODEL_DIR", "local"))
+    logger.info("Overlap separation: SepReformer (load from %s)",
+                os.environ.get("VILIER_SEPREFORMER_CHECKPOINT", "local"))
+    logger.info("")
+
     with tempfile.TemporaryDirectory(prefix="sommelier-config-") as temporary:
         config_path = Path(temporary) / "config.json"
         config_path.write_text(json.dumps(cfg), encoding="utf-8")
@@ -46,24 +63,39 @@ def run(source: Path, output: Path, config: dict):
     if not manifests:
         raise RuntimeError("Sommelier completed without its JSON manifest")
     manifest_path = str(manifests[-1])
+
+    logger.info("Reconstruction...")
     stereo = _reconstruct_tracks(source, manifests[-1], output)
 
-    # Log summary of timings consistent with DuplexChat
+    # Log summary theo logging.md: Time/RTF mỗi bước
     try:
         manifest_data = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
         metadata = manifest_data.get("metadata", {})
         audio_dur = metadata.get("audio_duration_seconds", 0.0)
-        t_pre = metadata.get("step0_preprocess", {}).get("processing_time_seconds", 0.0)
         t_dia = metadata.get("vad_sortformer", {}).get("processing_time_seconds", 0.0)
         t_sep = metadata.get("sepreformer_separation", {}).get("processing_time_seconds", 0.0)
         t_constrain = metadata.get("constrain_speakers", {}).get("processing_time_seconds", 0.0)
+        t_pre = metadata.get("step0_preprocess", {}).get("processing_time_seconds", 0.0)
         total_time = t_pre + t_dia + t_sep + t_constrain
+
+        def _rtf(t): return f"{t:.2f}s | RTF: {(t / audio_dur if audio_dur > 0 else 0.0):.4f}"
+
+        logger.info("")
+        if t_dia > 0:
+            logger.info("Overlap detection (Sortformer) — Time: %s", _rtf(t_dia))
+        if t_sep > 0:
+            logger.info("Overlap separation (SepReformer) — Time: %s", _rtf(t_sep))
+        if t_constrain > 0:
+            logger.info("Reconstruction — Time: %s", _rtf(t_constrain))
+        if audio_dur > 0:
+            speed_x = audio_dur / total_time if total_time > 0 else 0.0
+            logger.info("Audio: %.2fs | Total: %.2fs | Speed: %.2fx RT", audio_dur, total_time, speed_x)
+        logger.info("===> Done. Result saved to: %s", output)
 
         table_lines = [
             "| Stage | Processing Time (s) | RTF |",
             "| :--- | :---: | :---: |",
             f"| Audio Duration | {audio_dur:.2f} | — |",
-            f"| Step 0: Preprocess | {t_pre:.2f} | {(t_pre / audio_dur if audio_dur > 0 else 0.0):.4f} |",
             f"| VAD + Sortformer | {t_dia:.2f} | {(t_dia / audio_dur if audio_dur > 0 else 0.0):.4f} |",
             f"| SepReformer Separation | {t_sep:.2f} | {(t_sep / audio_dur if audio_dur > 0 else 0.0):.4f} |",
         ]
@@ -71,7 +103,6 @@ def run(source: Path, output: Path, config: dict):
             table_lines.append(f"| Constrain Speakers | {t_constrain:.2f} | {(t_constrain / audio_dur if audio_dur > 0 else 0.0):.4f} |")
         total_rtf = total_time / audio_dur if audio_dur > 0 else 0.0
         table_lines.append(f"| **Total** | **{total_time:.2f}** | **{total_rtf:.4f}** |")
-
         speech_content = "# Sommelier Speed & Performance Summary\n\n" + "\n".join(table_lines) + "\n"
         (output / "speech.md").write_text(speech_content, encoding="utf-8")
         try:

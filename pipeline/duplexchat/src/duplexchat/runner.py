@@ -13,7 +13,7 @@ import wave
 
 import torch
 
-from core.orchestration.logging_style import StepTimer, get_logger
+from core.orchestration.logging_style import StepTimer, get_logger, section
 from core.outputs import write_label_file
 
 from .audio import load_wav_tensor
@@ -99,40 +99,30 @@ def _compact_path(value, width: int = 46) -> str:
 
 def _log_run_summary(logger, audio_path, normalized, output_root, phase_dir, separation_output, devices, conversations, segment_count, phase_times, audio_duration_sec: float = 0.0):
     total_time = sum(t for t in phase_times.values() if t is not None) or 1e-6
-    logger.info("Runtime devices: diarization=%s; separation=%s", _device_label(devices[0]), [_device_label(device) for device in devices])
-    logger.info("Detected conversations: %d", conversations)
-    logger.info("Run summary:")
-    
-    rows = [
-        ("Preprocess", _compact_path(audio_path), "mono 16 kHz", _compact_path(normalized), phase_times.get("preprocess")),
-        ("Speaker diarization", normalized.name, f"{segment_count} segments", _compact_path(phase_dir / "phase_02_diarization"), phase_times.get("diarization")),
-        ("Dialogue separation", f"{conversations} conversations", f"{conversations} stereo 24 kHz WAV", _compact_path(separation_output), phase_times.get("separation")),
-    ]
-    
-    for i, (phase, input_name, output, saved_at, elapsed) in enumerate(rows):
-        if elapsed is None:
-            duration = "SKIPPED"
-        else:
-            pct = (elapsed / total_time) * 100.0
-            duration = f"{elapsed:.2f}s ({pct:.1f}%)"
-        logger.info(f"├── {phase} [{duration}]")
-        logger.info(f"│   ├── Input:    {input_name}")
-        logger.info(f"│   ├── Output:   {output}")
-        logger.info(f"│   └── Saved at: {saved_at}")
-        
     speed_x = (audio_duration_sec / total_time) if (total_time > 0 and audio_duration_sec > 0) else 0.0
     rtf = (total_time / audio_duration_sec) if audio_duration_sec > 0 else 0.0
     mm, ss = divmod(int(audio_duration_sec), 60)
     time_fmt = f"{mm:02d}:{ss:02d}"
 
-    logger.info("└── Speed & Performance Report:")
+    stage_names = {
+        "preprocess": "1. Preprocessing",
+        "diarization": "2. Split Dialogue",
+        "music_filter": "3. Remove music background",
+        "separation": "2. DuplexChat Separation",
+    }
+
+    logger.info("")
+    logger.info("Detected conversations: %d | Device: %s", conversations, _device_label(devices[0]))
+    for key, elapsed in phase_times.items():
+        label = stage_names.get(key, key.replace("_", " ").capitalize())
+        if elapsed is not None:
+            rtf_val = (elapsed / audio_duration_sec) if audio_duration_sec > 0 else 0.0
+            logger.info("%s — Time: %.2fs | RTF: %.4f", label, elapsed, rtf_val)
+        else:
+            logger.info("%s — SKIPPED", label)
     if audio_duration_sec > 0:
-        logger.info(f"    ├── Audio duration:   {audio_duration_sec:.2f}s ({time_fmt})")
-        logger.info(f"    ├── Total runtime:    {total_time:.2f}s")
-        logger.info(f"    ├── Processing speed: {speed_x:.2f}x Real-Time (RTF: {rtf:.3f})")
-    else:
-        logger.info(f"    ├── Total runtime:    {total_time:.2f}s")
-    logger.info(f"    └── Output root:      {output_root}")
+        logger.info("Audio: %.2fs (%s) | Total: %.2fs | Speed: %.2fx RT", audio_duration_sec, time_fmt, total_time, speed_x)
+    logger.info("===> Result saved to: %s", output_root)
 
     try:
         table_lines = [
@@ -140,12 +130,6 @@ def _log_run_summary(logger, audio_path, normalized, output_root, phase_dir, sep
             "| :--- | :---: | :---: |",
             f"| Audio Duration | {audio_duration_sec:.2f} | — |",
         ]
-        stage_names = {
-            "preprocess": "Preprocess",
-            "diarization": "Speaker diarization",
-            "separation": "Dialogue separation",
-            "music_filter": "Music filtering / Denoising",
-        }
         for key, elapsed in phase_times.items():
             if elapsed is not None:
                 label = stage_names.get(key, key.replace("_", " ").capitalize())
@@ -153,41 +137,12 @@ def _log_run_summary(logger, audio_path, normalized, output_root, phase_dir, sep
                 table_lines.append(f"| {label} | {elapsed:.2f} | {rtf_val:.4f} |")
         total_rtf = (total_time / audio_duration_sec) if audio_duration_sec > 0 else 0.0
         table_lines.append(f"| **Total** | **{total_time:.2f}** | **{total_rtf:.4f}** |")
-
         speech_content = "# DuplexChat Speed & Performance Summary\n\n" + "\n".join(table_lines) + "\n"
-
-        # Tự động ghi vào file speech.md ở thư mục output và thư mục làm việc hiện tại
         (Path(output_root) / "speech.md").write_text(speech_content, encoding="utf-8")
         try:
             Path("speech.md").write_text(speech_content, encoding="utf-8")
         except Exception:
             pass
-
-        md_lines = [
-            "# DuplexChat Performance & Speed Summary",
-            "",
-            f"- **Input Audio**: `{Path(audio_path).name}`",
-            f"- **Audio Duration**: {audio_duration_sec:.2f}s ({time_fmt})",
-            f"- **Total Runtime**: {total_time:.2f}s",
-            f"- **Processing Speed**: {speed_x:.2f}x Real-Time (RTF: {rtf:.3f})",
-            f"- **Diarization Device**: `{_device_label(devices[0])}`",
-            f"- **Separation Devices**: `{[_device_label(d) for d in devices]}`",
-            "",
-            "## Speed Table",
-            "",
-            "\n".join(table_lines),
-            "",
-            "## Phase Breakdown",
-            "",
-            "| Phase | Input | Output | Time (s) | Occupancy (%) |",
-            "| :--- | :--- | :--- | :--- | :--- |",
-        ]
-        for phase, input_name, output, saved_at, elapsed in rows:
-            if elapsed is not None:
-                pct = (elapsed / total_time) * 100.0
-                md_lines.append(f"| {phase} | `{input_name}` | `{output}` | {elapsed:.2f}s | {pct:.1f}% |")
-        md_path = Path(output_root) / "run_summary.md"
-        md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
     except Exception:
         pass
 
@@ -278,8 +233,8 @@ def run_single_audio(
         except Exception:
             pass
 
-    logger.info("Runtime devices: diarization=%s; separation=%s", _device_label(devices[0]), [_device_label(device) for device in devices])
-    with StepTimer(logger, "Step 1: Speaker diarization", duration_sec=audio_duration_sec) as timer:
+    logger.info("Device: diarization=%s | separation=%s", _device_label(devices[0]), [_device_label(d) for d in devices])
+    with StepTimer(logger, "2. Split Dialogue", duration_sec=audio_duration_sec) as timer:
         diarizer, segments = diarize(normalized, phase_dir, diarization_model, diarization_backend, devices[0], diarize_chunk, _no_progress)
     phase_times["diarization"] = timer.elapsed
     _release(diarizer)
@@ -291,7 +246,8 @@ def run_single_audio(
 
     summary = dialogue_filter_summary(segments)
     dialogues = extract_valid_dialogues(segments)
-    logger.info("Conversation filtering=%s", summary)
+    logger.info("Found %d clips", len(dialogues))
+    logger.info("Ignore: %d Imbalance | %d Short", summary.get("rejected_imbalanced", 0), summary.get("rejected_short", 0))
     logger.info("Detected conversations: %d", len(dialogues))
     if debug:
         write_label_file(
@@ -303,8 +259,8 @@ def run_single_audio(
     music_filter = load_music_filter(model_name=music_model, device=devices[0], enabled=filter_music) if filter_music else None
     rows = []
     if dialogues:
-        with StepTimer(logger, "Step 2: Dialogue separation", duration_sec=audio_duration_sec) as timer:
-            logger.info("DialogueSidon sample rates: input=%d Hz, output=%d Hz", SAMPLE_RATE_IN, OUTPUT_SAMPLE_RATE)
+        with StepTimer(logger, "2. DuplexChat Separation", duration_sec=audio_duration_sec) as timer:
+            logger.info("DialogueSidon | input=%d Hz -> output=%d Hz", SAMPLE_RATE_IN, OUTPUT_SAMPLE_RATE)
             separated = _separate_dialogues(
                 waveform, sample_rate, dialogues, devices, num_steps, separate_chunk,
                 music_filter=music_filter, phase_dir=phase_dir, debug=debug, separation_model=separation_model,
@@ -366,7 +322,12 @@ def split_valid_dialogues(
     except Exception:
         pass
 
-    with StepTimer(logger, "Step 0: Preprocess", duration_sec=audio_duration_sec) as timer:
+    print(section("Dialogue Filtering"))
+    logger.info("Dataset : %s", audio_path)
+    logger.info("Output  : %s", output_root)
+    logger.info("Device  : %s", _device_label(devices[0]))
+
+    with StepTimer(logger, "1. Preprocessing", duration_sec=audio_duration_sec) as timer:
         normalized = prepare_input(audio_path, phase_dir)
     phase_times["preprocess"] = timer.elapsed
 
@@ -377,7 +338,7 @@ def split_valid_dialogues(
         except Exception:
             pass
 
-    with StepTimer(logger, "Step 1: Speaker diarization", duration_sec=audio_duration_sec) as timer:
+    with StepTimer(logger, "2. Split Dialogue", duration_sec=audio_duration_sec) as timer:
         diarizer, segments = diarize(normalized, phase_dir, diarization_model, diarization_backend, devices[0], diarize_chunk, _no_progress)
     phase_times["diarization"] = timer.elapsed
     _release(diarizer)
@@ -390,8 +351,8 @@ def split_valid_dialogues(
 
     summary = dialogue_filter_summary(segments)
     dialogues = extract_valid_dialogues(segments)
-    logger.info("Conversation filtering=%s", summary)
-    logger.info("Detected conversations: %d", len(dialogues))
+    logger.info("Found %d clips | Ignore: %d Imbalance | %d Short",
+                len(dialogues), summary.get("rejected_imbalanced", 0), summary.get("rejected_short", 0))
 
     waveform, sample_rate = load_wav_tensor(normalized)
     audio_duration_sec = float(waveform.shape[-1] / sample_rate)
