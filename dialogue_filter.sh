@@ -12,9 +12,11 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PROJECT_ROOT/scripts/env.sh"
 
-python "$PROJECT_ROOT/scripts/convert_crawl_to_raw.py" \
-    --crawl-dir "$CRAWL_DIR" \
-    --raw-dir "$BASE_DATA/raw"
+if [ -d "${CRAWL_DIR:-}" ] && [ -n "$(ls -A "$CRAWL_DIR" 2>/dev/null)" ]; then
+    python "$PROJECT_ROOT/scripts/convert_crawl_to_raw.py" \
+        --crawl-dir "$CRAWL_DIR" \
+        --raw-dir "$BASE_DATA/raw"
+fi
 
 python "$PROJECT_ROOT/scripts/run_pipeline_batch.py" \
     --step split_dialogue \

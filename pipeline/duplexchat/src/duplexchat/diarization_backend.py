@@ -73,7 +73,14 @@ class SortformerDiarizationAdapter(FileDiarizationAdapter):
         self.model = model
 
     def diarize_file(self, wav_path: Path) -> list[dict]:
-        predicted = self.model.diarize(audio=str(wav_path), batch_size=1)
+        try:
+            predicted = self.model.diarize(audio=str(wav_path), batch_size=1)
+        except NotImplementedError as exc:
+            if "Streaming mode is not implemented" in str(exc) and hasattr(self.model, "streaming_mode"):
+                self.model.streaming_mode = False
+                predicted = self.model.diarize(audio=str(wav_path), batch_size=1)
+            else:
+                raise
         return _segments_from_sortformer_output(predicted)
 
 
@@ -199,12 +206,14 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
     if not target_path.is_file() and not is_offline_mode() and "/" in target_str:
         try:
             from huggingface_hub import hf_hub_download
-            nemo_filename = "diar_streaming_sortformer_4spk-v2.1.nemo"
+            model_subname = target_str.split("/")[-1]
+            nemo_filename = f"{model_subname}.nemo"
             downloaded = hf_hub_download(repo_id=target_str, filename=nemo_filename)
             target_str = downloaded
             target_path = Path(downloaded)
         except Exception:
             pass
+
 
     def _restore(path_str: str):
         """Load .nemo với fallback patch nếu NeMo version cũ không nhận tham số mới.
