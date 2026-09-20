@@ -166,3 +166,40 @@ def test_sommelier_pipeline_declares_max_chunk_duration():
     assert somm_cfg.get("max_chunk_duration") == 300.0
 
 
+def test_setup_env_has_no_external_index_url():
+    root = Path(__file__).resolve().parents[1]
+    setup_script = (root / "setup_env.sh").read_text()
+    assert "--extra-index-url" not in setup_script
+    assert "--index-url" not in setup_script
+
+
+def test_all_runtime_dependencies_are_pinned():
+    root = Path(__file__).resolve().parents[1]
+    
+    # duplexchat pyproject.toml
+    duplex_cfg = tomllib.loads((root / "pipeline" / "duplexchat" / "pyproject.toml").read_text())
+    for dep in duplex_cfg["project"]["dependencies"]:
+        if dep == "duplex-pipelines":
+            continue
+        assert "==" in dep, f"Dependency '{dep}' in duplexchat is not strictly pinned with '=='"
+
+    # sommelier pyproject.toml
+    somm_cfg = tomllib.loads((root / "pipeline" / "sommelier" / "pyproject.toml").read_text())
+    for dep in somm_cfg["project"]["dependencies"]:
+        if dep == "duplex-pipelines":
+            continue
+        assert "==" in dep, f"Dependency '{dep}' in sommelier is not strictly pinned with '=='"
+
+    # requirements-duplexchat.txt
+    for line in (root / "requirements-duplexchat.txt").read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        assert "==" in line, f"Dependency '{line}' in requirements-duplexchat.txt is not strictly pinned with '=='"
+
+    # requirements-sommelier.txt
+    for line in (root / "requirements-sommelier.txt").read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        assert "==" in line, f"Dependency '{line}' in requirements-sommelier.txt is not strictly pinned with '=='"

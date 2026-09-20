@@ -55,8 +55,8 @@ setup_conda_duplexchat() {
     conda run -n duplexchat pip install -r "$PROJECT_ROOT/requirements-duplexchat.txt"
 
     log_info "Cài đặt NVIDIA NeMo Toolkit (Sortformer Diarization)..."
-    conda run -n duplexchat pip install Cython packaging
-    conda run -n duplexchat pip install "nemo_toolkit[asr]>=2.3.0"
+    conda run -n duplexchat pip install Cython==3.1.2 packaging==24.2
+    conda run -n duplexchat pip install "nemo_toolkit[asr]==2.3.0"
 
     log_ok "Môi trường [duplexchat] đã sẵn sàng!"
 }

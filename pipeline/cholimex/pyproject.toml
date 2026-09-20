@@ -2,7 +2,16 @@
 name = "cholimex-runtime"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = ["duplex-pipelines[cholimex]", "soundfile", "torch==2.8.0", "torchaudio==2.8.0", "torchcodec>=0.6,<0.8", "wrapt>=2.4.0"]
+dependencies = [
+    "duplex-pipelines[cholimex]",
+    "soundfile==0.13.1",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+    "torchcodec==0.7.0",
+    "wrapt==2.4.0",
+    "speechbrain==1.0.3",
+    "numpy==1.26.4",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

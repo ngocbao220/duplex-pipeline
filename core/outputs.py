@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import torch
-import torchaudio
+try:
+    import torchaudio
+except (ImportError, OSError):
+    torchaudio = None
 
 
 def safe_name(value: str) -> str:
@@ -122,7 +125,10 @@ def save_wav(path: Path, wav: torch.Tensor, sample_rate: int) -> Path:
             arr = arr.T  # soundfile expects (samples, channels)
         sf.write(str(path), arr, sample_rate)
     except Exception:
-        torchaudio.save(str(path), wav.cpu(), sample_rate)
+        if torchaudio is not None:
+            torchaudio.save(str(path), wav.cpu(), sample_rate)
+        else:
+            raise
     return path
 
 

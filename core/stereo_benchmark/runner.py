@@ -13,7 +13,10 @@ from time import perf_counter
 import numpy as np
 import soundfile as sf
 import torch
-import torchaudio
+try:
+    import torchaudio
+except (ImportError, OSError):
+    torchaudio = None
 
 try:
     from core.runtime_cpu import enforce_single_cpu_thread
@@ -95,7 +98,7 @@ def run_benchmark(audio_path: Path, output_dir: Path, device: str = "auto", debu
             },
             "total_seconds": diagnostics_at - started,
         },
-        "versions": {"benchmark": "0.1.0", "python": platform.python_version(), "torch": torch.__version__, "torchaudio": torchaudio.__version__},
+        "versions": {"benchmark": "0.1.0", "python": platform.python_version(), "torch": torch.__version__, "torchaudio": getattr(torchaudio, "__version__", "unavailable") if torchaudio else "unavailable"},
         "config": {"activity": config_dict(activity_config), "turn_analysis": {"merge_gap_sec": MERGE_GAP_SEC, "min_turn_duration_sec": MIN_TURN_DURATION_SEC, "max_backchannel_duration_sec": MAX_BACKCHANNEL_DURATION_SEC}},
     }
     timeline = {"left_vad": mask_segments(left_mask, frame_sec, "left"), "right_vad": mask_segments(right_mask, frame_sec, "right"), "turns": dynamics["turns"], "overlaps": mask_segments(left_mask & right_mask, frame_sec), "backchannel_candidates": dynamics["backchannel_candidates"], "transitions": dynamics["transitions"]}

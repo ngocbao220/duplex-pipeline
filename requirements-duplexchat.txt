@@ -21,16 +21,17 @@ packaging==24.2
 omegaconf==2.3.0
 hydra-core==1.3.2
 pytorch-lightning==2.5.0.post0
-transformers>=4.48.0
+transformers==4.48.0
 youtokentome==1.0.6
 editdistance==0.8.1
-nemo_toolkit[asr]>=2.3.0
+nemo_toolkit[asr]==2.3.0
 
 # Separation Backend (DialogueSidon)
 diffusers==0.30.0
 huggingface-hub==0.33.4
 wrapt==2.4.0
 onnxruntime==1.22.1
+numpy==1.26.4
 
 # Utilities
 tqdm==4.67.1
