@@ -12,6 +12,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/pipeline/duplexchat/src:$PROJECT_ROOT/pipeline/sommelier/src:$PROJECT_ROOT/pipeline/cholimex/src:$PROJECT_ROOT/pipeline/sommelier/vendor/podcast_pipeline:$PROJECT_ROOT/pipeline/sommelier/vendor/SepReformer:${PYTHONPATH:-}"
 
 PIPELINE="${PIPELINE:-duplexchat}"
 MODE="${MODE:-sever}"
