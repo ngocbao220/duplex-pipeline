@@ -2,30 +2,29 @@
 # Use with internal wheelhouse or local mirror:
 # pip install --no-index --find-links=/path/to/wheelhouse -r requirements.txt
 
-tqdm==4.67.1
+tqdm
 pyannote.audio==3.3.2
 torch==2.8.0
 torchaudio==2.8.0
 torchcodec==0.7.0
-soundfile==0.13.1
-diffusers==0.30.0
+soundfile
+diffusers<=0.30.0
 huggingface-hub==0.33.4
-wrapt==2.4.0
-onnxruntime==1.22.1
+wrapt
+onnxruntime
 speechbrain==1.0.3
-librosa==0.11.0
-pydub==0.25.1
+librosa
+pydub
 demucs==4.0.1
-Cython==3.1.2
+Cython
 nemo_toolkit[asr]==2.3.0
-packaging==24.2
-pytest==8.4.1
-omegaconf==2.3.0
-hydra-core==1.3.2
-pytorch-lightning==2.5.0.post0
-transformers==4.53.3
-youtokentome==1.0.6
-editdistance==0.8.1
-numpy==1.26.4
+packaging
+pytest
+omegaconf
+hydra-core
+pytorch-lightning
+transformers>=4.51.0,<=4.53.3
+numpy
+
 
 

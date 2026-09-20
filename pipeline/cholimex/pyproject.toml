@@ -4,13 +4,13 @@ version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "duplex-pipelines[cholimex]",
-    "soundfile==0.13.1",
+    "soundfile",
     "torch==2.8.0",
     "torchaudio==2.8.0",
     "torchcodec==0.7.0",
-    "wrapt==2.4.0",
+    "wrapt",
     "speechbrain==1.0.3",
-    "numpy==1.26.4",
+    "numpy",
 ]
 
 [build-system]
@@ -22,3 +22,7 @@ where = ["src"]
 
 [tool.uv.sources]
 duplex-pipelines = { path = "../..", editable = true }
+
+[tool.uv.extra-build-dependencies]
+youtokentome = ["Cython"]
+

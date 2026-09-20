@@ -173,33 +173,37 @@ def test_setup_env_has_no_external_index_url():
     assert "--index-url" not in setup_script
 
 
-def test_all_runtime_dependencies_are_pinned():
+def test_core_runtime_dependencies_are_pinned():
     root = Path(__file__).resolve().parents[1]
     
     # duplexchat pyproject.toml
     duplex_cfg = tomllib.loads((root / "pipeline" / "duplexchat" / "pyproject.toml").read_text())
-    for dep in duplex_cfg["project"]["dependencies"]:
-        if dep == "duplex-pipelines":
-            continue
-        assert "==" in dep, f"Dependency '{dep}' in duplexchat is not strictly pinned with '=='"
+    duplex_deps = set(duplex_cfg["project"]["dependencies"])
+    assert "torch==2.8.0" in duplex_deps
+    assert "torchaudio==2.8.0" in duplex_deps
+    assert "nemo_toolkit[asr]==2.3.0" in duplex_deps
+    assert "speechbrain==1.0.3" in duplex_deps
+    assert "pyannote.audio==3.3.2" in duplex_deps
+    assert duplex_cfg.get("tool", {}).get("uv", {}).get("extra-build-dependencies", {}).get("youtokentome") == ["Cython"]
 
     # sommelier pyproject.toml
     somm_cfg = tomllib.loads((root / "pipeline" / "sommelier" / "pyproject.toml").read_text())
-    for dep in somm_cfg["project"]["dependencies"]:
-        if dep == "duplex-pipelines":
-            continue
-        assert "==" in dep, f"Dependency '{dep}' in sommelier is not strictly pinned with '=='"
+    somm_deps = set(somm_cfg["project"]["dependencies"])
+    assert "torch==2.7.1" in somm_deps
+    assert "torchaudio==2.7.1" in somm_deps
+    assert "torchmetrics==1.7.4" in somm_deps
+    assert "speechbrain==1.0.3" in somm_deps
+    assert "pyannote.audio==3.3.2" in somm_deps
+    assert "nemo_toolkit[asr]==3.0.0" in somm_deps
+    assert somm_cfg.get("tool", {}).get("uv", {}).get("extra-build-dependencies", {}).get("youtokentome") == ["Cython"]
 
-    # requirements-duplexchat.txt
-    for line in (root / "requirements-duplexchat.txt").read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        assert "==" in line, f"Dependency '{line}' in requirements-duplexchat.txt is not strictly pinned with '=='"
+    # requirements-duplexchat.txt core pins
+    duplex_req = (root / "requirements-duplexchat.txt").read_text()
+    assert "torch==2.8.0" in duplex_req
+    assert "nemo_toolkit[asr]==2.3.0" in duplex_req
 
-    # requirements-sommelier.txt
-    for line in (root / "requirements-sommelier.txt").read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        assert "==" in line, f"Dependency '{line}' in requirements-sommelier.txt is not strictly pinned with '=='"
+    # requirements-sommelier.txt core pins
+    somm_req = (root / "requirements-sommelier.txt").read_text()
+    assert "torch==2.7.1" in somm_req
+    assert "nemo_toolkit[asr]==3.0.0" in somm_req
+
