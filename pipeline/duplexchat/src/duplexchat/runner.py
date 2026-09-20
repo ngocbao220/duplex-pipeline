@@ -395,6 +395,19 @@ def split_valid_dialogues(
         })
         output_dialogue_idx += 1
 
+    if not dialogue_info:
+        logger.warning(
+            "===> [WARNING] Audio '%s' produced 0 valid dialogue clips! "
+            "(Segments: %d, Candidate runs: %d, Ignored Imbalance: %d, Ignored Short: %d)",
+            audio_path.name,
+            len(segments),
+            len(dialogues),
+            summary.get("rejected_imbalanced", 0),
+            summary.get("rejected_short", 0),
+        )
+    else:
+        logger.info("===> Collect %d dialogue clips from '%s', saved to '%s'", len(dialogue_info), audio_path.name, output_root)
+
     manifest = {
         "source_audio": str(audio_path),
         "audio_duration_sec": audio_duration_sec,
@@ -448,16 +461,26 @@ def separate_dialogue_files(
     output_root.mkdir(parents=True, exist_ok=True)
 
     if not dialogue_files:
+        logger.warning("No dialogue files (dialogue_*.wav) found in '%s' (0 clips from dialogue filtering). Skipping DuplexChat separation.", input_path.name)
         return {
             "stereo_files": [],
             "devices": devices,
             "dialogue_count": 0,
         }
 
+    total_input_dur = 0.0
+    for df in dialogue_files:
+        try:
+            with wave.open(str(df), "rb") as wf:
+                total_input_dur += wf.getnframes() / float(wf.getframerate())
+        except Exception:
+            pass
+
     # ===== Section header theo logging.md =====
     print(section("DuplexChat"))
     model_loc = separation_model or os.environ.get("DUPLEX_MODEL_DIR", "local")
     logger.info("Separation by \"DialogueSidon\" (load from %s)", model_loc)
+    logger.info("+ Input duration: %.2fs", total_input_dur)
     logger.info("+ Output sample rate: 24khz")
     logger.info("")
 

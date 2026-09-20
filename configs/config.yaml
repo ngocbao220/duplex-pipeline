@@ -10,7 +10,7 @@ defaults:
 
 # Execution controls
 step: all               # Options: all | convert | split_dialogue | separate_dialogue | sommelier | benchmark
-gpu: 2                  # Target GPU ID (e.g. 0, 1, 2 or "0,1")
+gpu: auto                  # Target GPU ID: auto (detects all available GPUs) | "0,1" | 0 | 1
 debug: false            # Write intermediate debug audio/artifacts
 dry_run: false          # Print execution commands without running
 

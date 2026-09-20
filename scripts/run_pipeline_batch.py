@@ -282,7 +282,41 @@ def run_batch():
 
     env = dict(os.environ)
     gpu_str = str(args.gpu).strip()
-    env["CUDA_VISIBLE_DEVICES"] = gpu_str
+
+    # Resolve GPU devices intelligently
+    if gpu_str.lower() in ("auto", "all"):
+        try:
+            import torch
+            n_gpus = torch.cuda.device_count()
+            if n_gpus > 0:
+                gpu_list = [str(i) for i in range(n_gpus)]
+            else:
+                gpu_list = ["0"]
+        except Exception:
+            gpu_list = ["0"]
+    else:
+        raw_gpus = [g.strip() for g in gpu_str.split(",") if g.strip()]
+        try:
+            import torch
+            n_gpus = torch.cuda.device_count()
+            if n_gpus > 0:
+                valid_gpus = []
+                for g in raw_gpus:
+                    if g.isdigit():
+                        valid_gpus.append(str(int(g) % n_gpus))
+                    else:
+                        valid_gpus.append(g)
+                gpu_list = list(dict.fromkeys(valid_gpus))
+            else:
+                gpu_list = raw_gpus
+        except Exception:
+            gpu_list = raw_gpus
+
+    gpu_label = ",".join(gpu_list)
+    num_gpus = len(gpu_list)
+    workers_per_gpu = max(1, args.workers)
+    total_workers = workers_per_gpu * num_gpus if num_gpus > 1 else workers_per_gpu
+
     # Limit CPU thread pinning to avoid 100% CPU spikes across massive cores
     env["OMP_NUM_THREADS"] = "1"
     env["MKL_NUM_THREADS"] = "1"
@@ -290,9 +324,14 @@ def run_batch():
     env["VECLIB_MAXIMUM_THREADS"] = "1"
     env["NUMEXPR_NUM_THREADS"] = "1"
     env["TORCH_NUM_THREADS"] = "1"
-    # When CUDA_VISIBLE_DEVICES is set, CUDA devices are re-indexed starting from 0 inside the process
-    num_gpus = len([g for g in gpu_str.split(",") if g.strip()])
-    inner_device_ids = [str(i) for i in range(num_gpus)]
+
+    import queue
+    def _create_gpu_queue() -> queue.Queue:
+        q: queue.Queue = queue.Queue()
+        for g in gpu_list:
+            for _ in range(workers_per_gpu):
+                q.put(g)
+        return q
 
     if args.step == "split_dialogue":
         wav_files = sorted(list(input_dir.glob(args.pattern)))
@@ -300,16 +339,19 @@ def run_batch():
             print(f"No files matching '{args.pattern}' found in {input_dir}")
             return
 
-        print(f"=== Running split_dialogue on {len(wav_files)} files from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
+        print(f"=== Running split_dialogue on {len(wav_files)} files from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
         if args.dry_run:
             for idx, wav in enumerate(wav_files, start=1):
                 sub_out = output_dir / wav.stem
+                target_gpu = gpu_list[(idx - 1) % len(gpu_list)]
+                dev_args = ["--device-ids", "0"] if target_gpu != "cpu" else ["--device-ids", "cpu"]
+                gpu_tag = f"[GPU {target_gpu}] " if target_gpu != "cpu" else "[CPU] "
                 filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
                 cmd = [
                     sys.executable, "-m", "duplexchat", "split_valid_dialogue",
                     "--input", str(wav),
                     "--output-dir", str(sub_out),
-                    "--device-ids", *inner_device_ids,
+                    *dev_args,
                     filter_flag
                 ]
                 if args.lid:
@@ -318,33 +360,48 @@ def run_batch():
                     cmd.extend(["--diarization-backend", args.diarization_backend])
                 if args.diarization_model:
                     cmd.extend(["--diarization-model", args.diarization_model])
-                print(f"[{idx}/{len(wav_files)}] {wav.name} -> {sub_out.name}")
+                print(f"[{idx}/{len(wav_files)}] {gpu_tag}{wav.name} -> {sub_out.name}")
                 print("  Command:", " ".join(cmd))
         else:
+            gpu_queue = _create_gpu_queue()
+
             def _process_one_wav(item):
                 idx, wav = item
                 sub_out = output_dir / wav.stem
-                filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
-                cmd = [
-                    sys.executable, "-m", "duplexchat", "split_valid_dialogue",
-                    "--input", str(wav),
-                    "--output-dir", str(sub_out),
-                    "--device-ids", *inner_device_ids,
-                    filter_flag
-                ]
-                if args.lid:
-                    cmd.extend(["--lid", args.lid])
-                if args.diarization_backend:
-                    cmd.extend(["--diarization-backend", args.diarization_backend])
-                if args.diarization_model:
-                    cmd.extend(["--diarization-model", args.diarization_model])
-                print(f"[{idx}/{len(wav_files)}] {wav.name} -> {sub_out.name}")
-                timing = _timed_subprocess(cmd, wav, sub_out, env)
-                if timing["exit_code"] != 0:
-                    print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
-                return timing
+                target_gpu = gpu_queue.get()
+                try:
+                    worker_env = dict(env)
+                    if target_gpu != "cpu":
+                        worker_env["CUDA_VISIBLE_DEVICES"] = target_gpu
+                        dev_args = ["--device-ids", "0"]
+                        gpu_tag = f"[GPU {target_gpu}] "
+                    else:
+                        dev_args = ["--device-ids", "cpu"]
+                        gpu_tag = "[CPU] "
 
-            with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                    filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
+                    cmd = [
+                        sys.executable, "-m", "duplexchat", "split_valid_dialogue",
+                        "--input", str(wav),
+                        "--output-dir", str(sub_out),
+                        *dev_args,
+                        filter_flag
+                    ]
+                    if args.lid:
+                        cmd.extend(["--lid", args.lid])
+                    if args.diarization_backend:
+                        cmd.extend(["--diarization-backend", args.diarization_backend])
+                    if args.diarization_model:
+                        cmd.extend(["--diarization-model", args.diarization_model])
+                    print(f"[{idx}/{len(wav_files)}] {gpu_tag}{wav.name} -> {sub_out.name}")
+                    timing = _timed_subprocess(cmd, wav, sub_out, worker_env)
+                    if timing["exit_code"] != 0:
+                        print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
+                    return timing
+                finally:
+                    gpu_queue.put(target_gpu)
+
+            with ThreadPoolExecutor(max_workers=max(1, total_workers)) as pool:
                 timing_items = list(pool.map(_process_one_wav, enumerate(wav_files, start=1)))
 
     elif args.step == "separate_dialogue":
@@ -357,49 +414,67 @@ def run_batch():
                 print(f"No dialogue subdirectories or files found in {input_dir}")
                 return
 
-        print(f"=== Running separate_dialogue on {len(subdirs)} dialogue folders from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
+        print(f"=== Running separate_dialogue on {len(subdirs)} dialogue folders from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
         if args.dry_run:
             for idx, sdir in enumerate(subdirs, start=1):
                 sub_out = output_dir / sdir.name
+                target_gpu = gpu_list[(idx - 1) % len(gpu_list)]
+                dev_args = ["--device-ids", "0"] if target_gpu != "cpu" else ["--device-ids", "cpu"]
+                gpu_tag = f"[GPU {target_gpu}] " if target_gpu != "cpu" else "[CPU] "
                 cmd = [
                     sys.executable, "-m", "duplexchat", "separate_dialogue",
                     "--input", str(sdir),
                     "--output-dir", str(sub_out),
-                    "--device-ids", *inner_device_ids,
+                    *dev_args,
                     "--separation-chunk", str(args.separation_chunk)
                 ]
                 if args.separation_model:
                     cmd.extend(["--separation-model", str(args.separation_model.resolve())])
-                print(f"[{idx}/{len(subdirs)}] {sdir.name} -> {sub_out.name}")
+                print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} -> {sub_out.name}")
                 print("  Command:", " ".join(cmd))
         else:
+            gpu_queue = _create_gpu_queue()
+
             def _process_one_subdir(item):
                 idx, sdir = item
                 sub_out = output_dir / sdir.name
-                cmd = [
-                    sys.executable, "-m", "duplexchat", "separate_dialogue",
-                    "--input", str(sdir),
-                    "--output-dir", str(sub_out),
-                    "--device-ids", *inner_device_ids,
-                    "--separation-chunk", str(args.separation_chunk)
-                ]
-                if args.separation_model:
-                    cmd.extend(["--separation-model", str(args.separation_model.resolve())])
-                print(f"[{idx}/{len(subdirs)}] {sdir.name} -> {sub_out.name}")
-                source_files = sorted(sdir.glob("dialogue_*.wav"))
-                source = source_files[0] if len(source_files) == 1 else sdir
-                timing = _timed_subprocess(cmd, source, sub_out, env)
-                if len(source_files) > 1:
-                    durations = [_audio_duration_seconds(path) for path in source_files]
-                    audio_seconds = sum(value for value in durations if value is not None)
-                    timing["audio_seconds"] = audio_seconds or None
-                    timing["real_time_factor"] = timing["elapsed_seconds"] / audio_seconds if audio_seconds else None
-                    timing["audio_seconds_per_wall_second"] = audio_seconds / timing["elapsed_seconds"] if audio_seconds and timing["elapsed_seconds"] else None
-                if timing["exit_code"] != 0:
-                    print(f"Error processing {sdir.name} (exit code {timing['exit_code']})")
-                return timing
+                target_gpu = gpu_queue.get()
+                try:
+                    worker_env = dict(env)
+                    if target_gpu != "cpu":
+                        worker_env["CUDA_VISIBLE_DEVICES"] = target_gpu
+                        dev_args = ["--device-ids", "0"]
+                        gpu_tag = f"[GPU {target_gpu}] "
+                    else:
+                        dev_args = ["--device-ids", "cpu"]
+                        gpu_tag = "[CPU] "
 
-            with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                    cmd = [
+                        sys.executable, "-m", "duplexchat", "separate_dialogue",
+                        "--input", str(sdir),
+                        "--output-dir", str(sub_out),
+                        *dev_args,
+                        "--separation-chunk", str(args.separation_chunk)
+                    ]
+                    if args.separation_model:
+                        cmd.extend(["--separation-model", str(args.separation_model.resolve())])
+                    print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} -> {sub_out.name}")
+                    source_files = sorted(sdir.glob("dialogue_*.wav"))
+                    source = source_files[0] if len(source_files) == 1 else sdir
+                    timing = _timed_subprocess(cmd, source, sub_out, worker_env)
+                    if len(source_files) > 1:
+                        durations = [_audio_duration_seconds(path) for path in source_files]
+                        audio_seconds = sum(value for value in durations if value is not None)
+                        timing["audio_seconds"] = audio_seconds or None
+                        timing["real_time_factor"] = timing["elapsed_seconds"] / audio_seconds if audio_seconds else None
+                        timing["audio_seconds_per_wall_second"] = audio_seconds / timing["elapsed_seconds"] if audio_seconds and timing["elapsed_seconds"] else None
+                    if timing["exit_code"] != 0:
+                        print(f"Error processing {sdir.name} (exit code {timing['exit_code']})")
+                    return timing
+                finally:
+                    gpu_queue.put(target_gpu)
+
+            with ThreadPoolExecutor(max_workers=max(1, total_workers)) as pool:
                 timing_items = list(pool.map(_process_one_subdir, enumerate(subdirs, start=1)))
 
     elif args.step == "sommelier":
@@ -409,17 +484,19 @@ def run_batch():
 
         subdirs = sorted([d for d in input_dir.iterdir() if d.is_dir()])
         if subdirs:
-            print(f"=== Running Sommelier on {len(subdirs)} dialogue folders from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
+            print(f"=== Running Sommelier on {len(subdirs)} dialogue folders from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
             if args.dry_run:
                 for idx, sdir in enumerate(subdirs, start=1):
                     sub_out = output_dir / sdir.name
+                    target_gpu = gpu_list[(idx - 1) % len(gpu_list)]
+                    gpu_tag = f"[GPU {target_gpu}] " if target_gpu != "cpu" else "[CPU] "
                     dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
                     if not dialogue_files:
                         dialogue_files = sorted(list(sdir.glob(args.pattern)))
                     if not dialogue_files:
-                        print(f"[{idx}/{len(subdirs)}] No audio clips found in {sdir.name}")
+                        print(f"[{idx}/{len(subdirs)}] {gpu_tag}No audio clips found in {sdir.name}")
                         continue
-                    print(f"[{idx}/{len(subdirs)}] {sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
+                    print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
                     for d_idx, dwav in enumerate(dialogue_files, start=1):
                         cmd = [
                             sys.executable, "-m", "sommelier", "single",
@@ -429,33 +506,46 @@ def run_batch():
                         print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
                         print("    Command:", " ".join(cmd))
             else:
+                gpu_queue = _create_gpu_queue()
+
                 def _process_sommelier_subdir(item):
                     idx, sdir = item
                     sub_out = output_dir / sdir.name
                     sub_out.mkdir(parents=True, exist_ok=True)
-                    dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
-                    if not dialogue_files:
-                        dialogue_files = sorted(list(sdir.glob(args.pattern)))
-                    if not dialogue_files:
-                        print(f"[{idx}/{len(subdirs)}] No audio clips found in {sdir.name}")
-                        return []
+                    target_gpu = gpu_queue.get()
+                    try:
+                        worker_env = dict(env)
+                        if target_gpu != "cpu":
+                            worker_env["CUDA_VISIBLE_DEVICES"] = target_gpu
+                            gpu_tag = f"[GPU {target_gpu}] "
+                        else:
+                            gpu_tag = "[CPU] "
 
-                    print(f"[{idx}/{len(subdirs)}] {sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
-                    sub_timings = []
-                    for d_idx, dwav in enumerate(dialogue_files, start=1):
-                        cmd = [
-                            sys.executable, "-m", "sommelier", "single",
-                            "--input", str(dwav),
-                            "--output-dir", str(sub_out)
-                        ]
-                        print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
-                        timing = _timed_subprocess(cmd, dwav, sub_out, env)
-                        sub_timings.append(timing)
-                        if timing["exit_code"] != 0:
-                            print(f"Error processing {dwav.name} (exit code {timing['exit_code']})")
-                    return sub_timings
+                        dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
+                        if not dialogue_files:
+                            dialogue_files = sorted(list(sdir.glob(args.pattern)))
+                        if not dialogue_files:
+                            print(f"[{idx}/{len(subdirs)}] {gpu_tag}No audio clips found in {sdir.name}")
+                            return []
 
-                with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                        print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
+                        sub_timings = []
+                        for d_idx, dwav in enumerate(dialogue_files, start=1):
+                            cmd = [
+                                sys.executable, "-m", "sommelier", "single",
+                                "--input", str(dwav),
+                                "--output-dir", str(sub_out)
+                            ]
+                            print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
+                            timing = _timed_subprocess(cmd, dwav, sub_out, worker_env)
+                            sub_timings.append(timing)
+                            if timing["exit_code"] != 0:
+                                print(f"Error processing {dwav.name} (exit code {timing['exit_code']})")
+                        return sub_timings
+                    finally:
+                        gpu_queue.put(target_gpu)
+
+                with ThreadPoolExecutor(max_workers=max(1, total_workers)) as pool:
                     results = list(pool.map(_process_sommelier_subdir, enumerate(subdirs, start=1)))
                     for r in results:
                         timing_items.extend(r)
