@@ -11,8 +11,8 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/anaconda3/bin:/opt/miniconda3/bin:$PATH"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/conda/bin:/opt/anaconda3/bin:/opt/miniconda3/bin:$PATH"
 
 # ANSI Colors
 C_RESET='\033[0m'

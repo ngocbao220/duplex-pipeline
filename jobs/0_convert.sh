@@ -9,7 +9,8 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
 if [ -d "/storage-voice/voice/vdt/baottn/duplex-data" ]; then
     DEFAULT_BASE_DATA="/storage-voice/voice/vdt/baottn/duplex-data"
@@ -48,14 +49,18 @@ while [[ $# -gt 0 ]]; do
 done
 FLAGS+=("--workers" "$WORKERS")
 
-# Resolve Python interpreter (prioritize duplex-pipelines conda env or local .venv over base)
-if [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
+# Resolve Python interpreter (prioritize explicit PYTHON, duplex-pipelines conda env or local .venv over base)
+if [ -n "${PYTHON:-}" ]; then
+    : # already set by caller
+elif [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
     PYTHON="${CONDA_PREFIX}/bin/python"
 elif [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/.venv/bin/python"
 elif command -v conda >/dev/null 2>&1 && conda env list 2>/dev/null | grep -E "^duplex-pipelines\s" >/dev/null 2>&1; then
     CONDA_ENV_PATH=$(conda env list 2>/dev/null | grep -E "^duplex-pipelines\s" | awk '{print $NF}')
     PYTHON="${CONDA_ENV_PATH}/bin/python"
+elif [ -x "/opt/conda/bin/python" ]; then
+    PYTHON="/opt/conda/bin/python"
 else
     PYTHON="${PYTHON:-python3}"
 fi

@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/pipeline/duplexchat/src:$PROJECT_ROOT/pipeline/sommelier/src:$PROJECT_ROOT/pipeline/cholimex/src:$PROJECT_ROOT/pipeline/sommelier/vendor/podcast_pipeline:$PROJECT_ROOT/pipeline/sommelier/vendor/SepReformer:${PYTHONPATH:-}"
 
 PIPELINE="${PIPELINE:-duplexchat}"
@@ -90,8 +90,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve Python interpreter (prioritize pipeline .venv, conda env, active env, or system python with hydra)
-if [ "$PIPELINE" = "sommelier" ] && [ -x "$PROJECT_ROOT/pipeline/sommelier/.venv/bin/python" ]; then
+# Mặc định là youtube nếu không chỉ định nguồn nào
+if [[ ${#SOURCES[@]} -eq 0 ]]; then
+    SOURCES=("youtube")
+fi
+
+# Resolve Python interpreter (prioritize explicit PYTHON, pipeline .venv, conda env, active env, or system python with hydra)
+if [ -n "${PYTHON:-}" ]; then
+    : # already set by caller
+elif [ "$PIPELINE" = "sommelier" ] && [ -x "$PROJECT_ROOT/pipeline/sommelier/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/pipeline/sommelier/.venv/bin/python"
 elif [ "$PIPELINE" = "duplexchat" ] && [ -x "$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python"

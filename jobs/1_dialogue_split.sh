@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# duplexchat.sh — Bước 2: Tách kênh thoại 2 người bằng DialogueSidon
+# dialogue_split.sh — Bước 1: Tiền xử lý & Lọc cuộc thoại hai người (Dialogue Filtering)
 #
 # Cách dùng:
-#   bash duplexchat.sh --youtube                   # Chạy cho folder YouTube (mặc định)
-#   bash duplexchat.sh --podcast-index             # Chạy cho folder Podcast Index
-#   bash duplexchat.sh --all                       # Chạy tuần tự cho cả hai nguồn
-#   bash duplexchat.sh --youtube --gpu 0           # Chỉ định GPU 0
-#   bash duplexchat.sh --youtube --chunk 60        # Cửa sổ cắt 60 giây
-#   bash duplexchat.sh --youtube --dev             # Chế độ Dev online
-#   bash duplexchat.sh --youtube --dry-run         # Chạy thử
+#   bash dialogue_split.sh --youtube                   # Chạy cho folder YouTube (mặc định)
+#   bash dialogue_split.sh --podcast-index             # Chạy cho folder Podcast Index
+#   bash dialogue_split.sh --all                       # Chạy tuần tự cho cả hai nguồn
+#   bash dialogue_split.sh --youtube --gpu 0           # Chỉ định GPU 0
+#   bash dialogue_split.sh --youtube --dev             # Chạy chế độ Dev (online)
+#   bash dialogue_split.sh --youtube --dry-run         # Chạy thử (không ghi dữ liệu)
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/pipeline/duplexchat/src:$PROJECT_ROOT/pipeline/sommelier/src:$PROJECT_ROOT/pipeline/cholimex/src:$PROJECT_ROOT/pipeline/sommelier/vendor/podcast_pipeline:$PROJECT_ROOT/pipeline/sommelier/vendor/SepReformer:${PYTHONPATH:-}"
 
 MODE="${MODE:-sever}"
 GPU_ID="${GPU_ID:-2}"
@@ -35,10 +35,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --gpu|-g)
             GPU_ID="$2"
-            shift 2
-            ;;
-        --chunk|-c)
-            HYDRA_ARGS+=("pipeline.separation.chunk=$2")
             shift 2
             ;;
         --dev)
@@ -64,27 +60,38 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve Python interpreter (prioritize pipeline .venv, conda env, or local .venv over base)
-if [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
-    PYTHON="${CONDA_PREFIX}/bin/python"
+# Mặc định là youtube nếu không chỉ định nguồn nào
+if [[ ${#SOURCES[@]} -eq 0 ]]; then
+    SOURCES=("youtube")
+fi
+
+# Resolve Python interpreter (prioritize explicit PYTHON, pipeline .venv, conda env, or local .venv over base)
+if [ -n "${PYTHON:-}" ]; then
+    : # already set by caller
 elif [ -x "$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python"
 elif [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/.venv/bin/python"
+elif [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
+    PYTHON="${CONDA_PREFIX}/bin/python"
+elif command -v conda >/dev/null 2>&1 && conda env list 2>/dev/null | grep -E "^duplexchat\s" >/dev/null 2>&1; then
+    CONDA_ENV_PATH=$(conda env list 2>/dev/null | grep -E "^duplexchat\s" | awk '{print $NF}')
+    PYTHON="${CONDA_ENV_PATH}/bin/python"
 elif command -v conda >/dev/null 2>&1 && conda env list 2>/dev/null | grep -E "^duplex-pipelines\s" >/dev/null 2>&1; then
     CONDA_ENV_PATH=$(conda env list 2>/dev/null | grep -E "^duplex-pipelines\s" | awk '{print $NF}')
     PYTHON="${CONDA_ENV_PATH}/bin/python"
+elif [ -x "/opt/conda/bin/python" ]; then
+    PYTHON="/opt/conda/bin/python"
 else
     PYTHON="${PYTHON:-python3}"
 fi
 
 for SRC in "${SOURCES[@]}"; do
     echo "======================================================================"
-    echo " [Phase 2 - DuplexChat] Separate Dialogue | Source: [${SRC}] | GPU: [${GPU_ID}]"
+    echo " [Phase 1] Split Dialogue | Source: [${SRC}] | GPU: [${GPU_ID}]"
     echo "======================================================================"
     "$PYTHON" "$PROJECT_ROOT/run_pipeline.py" \
-        step=separate_dialogue \
-        pipeline=duplexchat \
+        step=split_dialogue \
         env="$MODE" \
         gpu="$GPU_ID" \
         data.source="$SRC" \
