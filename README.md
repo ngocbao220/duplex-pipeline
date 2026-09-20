@@ -4,7 +4,15 @@ Pipeline xử lý cuộc thoại hai người gồm DuplexChat (DialogueSidon), 
 
 ## Chuẩn bị
 
-Chạy từ thư mục gốc dự án, bằng interpreter đã cài các dependency phù hợp với pipeline cần dùng. DuplexChat và benchmark dùng dependency trong `requirements-duplexchat.txt`; Sommelier dùng `requirements-sommelier.txt`. `env=sever` là chế độ offline, dùng đường dẫn model/dữ liệu cục bộ trong `configs/env/sever.yaml`. `env=dev` cho phép tải model từ Hugging Face theo các đường dẫn ở `configs/env/dev.yaml`.
+Chạy từ thư mục gốc dự án với Python 3.12. Mỗi pipeline dùng môi trường riêng: DuplexChat và benchmark dùng `requirements-duplexchat.txt`; Sommelier dùng `requirements-sommelier.txt`. Không cài hai file này trong cùng một môi trường vì chúng dùng các bộ Torch/NeMo khác nhau.
+
+```text
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install --prefer-binary -r requirements-duplexchat.txt
+python -m pip check
+```
+
+Để cài Sommelier, thay file requirements trong lệnh thứ hai bằng `requirements-sommelier.txt`. Hai file đã chốt ONNX có wheel Python 3.12, tránh pip backtrack về ONNX 1.10 và cố build source. `env=sever` là chế độ offline, dùng đường dẫn model/dữ liệu cục bộ trong `configs/env/sever.yaml`. `env=dev` cho phép tải model từ Hugging Face theo các đường dẫn ở `configs/env/dev.yaml`.
 
 ## Lệnh chạy
 

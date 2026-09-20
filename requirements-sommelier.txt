@@ -1,40 +1,40 @@
-# Requirements for Sommelier Conda Environment (Offline/Server compatible)
-# Python: >=3.10, <=3.12
+# Sommelier runtime for Python 3.12.
+# Keep this file aligned with pipeline/sommelier/pyproject.toml. Install it
+# in its own environment; do not combine it with requirements-duplexchat.txt.
 
-# Core PyTorch Stack (Giữ cố định bộ ba 2.8.0 để đảm bảo C++ ABI)
-torch==2.8.0
-torchaudio==2.8.0
-torchvision==0.23.0
+# PyTorch 2.7 ABI set required by the bundled SepReformer pipeline
+torch==2.7.1
+torchaudio==2.7.1
+torchmetrics==1.7.4
 
-# Audio processing
+# Audio, diarization, and ASR
+numpy
 soundfile
 pydub
 librosa
 pyloudnorm
 asteroid-filterbanks
-numpy
-
-# Diarization & Speaker linking
-pyannote.audio>=3.1.0
-speechbrain>=1.0.0
-Cython
-packaging
-nemo_toolkit[asr]>=2.0.0
+pyannote.audio==3.3.2
+speechbrain==1.0.3
+Cython==3.1.2
+packaging==24.2
 omegaconf
 hydra-core
-transformers>=4.40.0
+nemo_toolkit[asr]==3.0.0
+onnx==1.22.0
+onnxruntime==1.22.1
+transformers>=4.51.0,<=4.53.3
 
-# Sommelier pipeline models & runtime
-panns-inference
+# Bundled Sommelier pipeline
+panns-inference==0.1.1
 loguru
-lightning>=2.1.0
+tqdm
+lightning==2.4.0
 pandas
 requests
-tqdm
-huggingface-hub
-onnxruntime
-openai
-tritony
+openai==1.97.1
+tritony==0.0.20
 g2pk
-faster-whisper
-whisperx
+huggingface-hub==0.33.4
+faster-whisper==1.1.1
+whisperx==3.4.2

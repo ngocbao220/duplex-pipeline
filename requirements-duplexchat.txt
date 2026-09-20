@@ -1,38 +1,38 @@
-# Requirements for DuplexChat Conda Environment (Offline/Server compatible)
-# Python: >=3.10, <=3.12
-# PyTorch: 2.8.x
+# DuplexChat runtime for Python 3.12.
+# Keep this file aligned with pipeline/duplexchat/pyproject.toml. Install it
+# in its own environment; it is intentionally incompatible with Sommelier's
+# Torch/NeMo set.
 
-# Core PyTorch Stack (Giữ cố định bộ ba 2.8.0 để tránh lệch C++ ABI)
+# PyTorch 2.8 ABI set
 torch==2.8.0
 torchaudio==2.8.0
 torchvision==0.23.0
+torchcodec==0.7.0
 
-# Audio I/O and processing
+# Audio, diarization, and dialogue separation
 soundfile
 pydub
 librosa
-demucs>=4.0.0
+demucs==4.0.1
+pyannote.audio==3.3.2
+speechbrain==1.0.3
+diffusers==0.30.0
+huggingface-hub==0.33.4
+wrapt
 
-# Diarization backends & Speaker Embedding
-pyannote.audio>=3.1.0
-speechbrain>=1.0.0
-
-# Neural Audio / NeMo for Sortformer
-Cython
-packaging
+# Sortformer / NeMo. NeMo 2.3 is the runtime used by DuplexChat. Pinning a
+# Python-3.12-capable ONNX release prevents pip from backtracking to ONNX 1.10
+# source distributions, which cannot build their metadata on this interpreter.
+Cython==3.1.2
+packaging==24.2
 omegaconf
 hydra-core
 pytorch-lightning
-transformers>=4.40.0
-nemo_toolkit[asr]>=2.0.0
+transformers>=4.51.0,<=4.53.3
+nemo_toolkit[asr]==2.3.0
+onnx==1.16.2
+onnxruntime==1.22.1
 
-# Separation Backend (DialogueSidon)
-diffusers
-huggingface-hub
-wrapt
-onnxruntime
 numpy
-
-# Utilities
 tqdm
-pytest
+pytest==8.4.1

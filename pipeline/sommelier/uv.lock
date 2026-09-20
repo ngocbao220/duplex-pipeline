@@ -610,50 +610,63 @@ dependencies = [
     { name = "demucs", version = "4.1.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
     { name = "diffusers" },
     { name = "huggingface-hub" },
+    { name = "hydra-core" },
     { name = "librosa" },
     { name = "nemo-toolkit", extra = ["asr"] },
+    { name = "numpy" },
+    { name = "omegaconf" },
     { name = "onnxruntime" },
+    { name = "packaging" },
     { name = "pyannote-audio" },
+    { name = "pydub" },
+    { name = "pytorch-lightning" },
     { name = "soundfile" },
     { name = "speechbrain" },
     { name = "torch" },
     { name = "torchaudio" },
     { name = "torchcodec" },
     { name = "tqdm" },
+    { name = "transformers" },
     { name = "wrapt" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cython" },
-    { name = "cython", marker = "extra == 'diarization-sortformer'" },
-    { name = "demucs" },
-    { name = "demucs", marker = "extra == 'duplexchat'" },
+    { name = "cython", marker = "extra == 'diarization-sortformer'", specifier = "==3.1.2" },
+    { name = "demucs", specifier = ">=4.0.1" },
+    { name = "demucs", marker = "extra == 'duplexchat'", specifier = "==4.0.1" },
     { name = "diffusers", specifier = "<=0.30.0" },
-    { name = "diffusers", marker = "extra == 'separation-dialoguesidon'" },
-    { name = "huggingface-hub" },
-    { name = "huggingface-hub", marker = "extra == 'separation-dialoguesidon'" },
-    { name = "librosa", specifier = ">=0.10" },
-    { name = "nemo-toolkit", extras = ["asr"] },
-    { name = "nemo-toolkit", extras = ["asr"], marker = "extra == 'diarization-sortformer'" },
-    { name = "nisqa", marker = "extra == 'nisqa'" },
+    { name = "diffusers", marker = "extra == 'separation-dialoguesidon'", specifier = "==0.30.0" },
+    { name = "huggingface-hub", specifier = "==0.33.4" },
+    { name = "huggingface-hub", marker = "extra == 'separation-dialoguesidon'", specifier = "==0.33.4" },
+    { name = "hydra-core" },
+    { name = "librosa" },
+    { name = "nemo-toolkit", extras = ["asr"], specifier = ">=2.3.0,<=3.0.0" },
+    { name = "nemo-toolkit", extras = ["asr"], marker = "extra == 'diarization-sortformer'", specifier = "==2.3.0" },
+    { name = "numpy" },
+    { name = "omegaconf" },
     { name = "onnxruntime" },
-    { name = "packaging", marker = "extra == 'diarization-sortformer'" },
-    { name = "pyannote-audio" },
-    { name = "pyannote-audio", marker = "extra == 'diarization-pyannote'", specifier = ">=3.1" },
-    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "packaging" },
+    { name = "packaging", marker = "extra == 'diarization-sortformer'", specifier = "==24.2" },
+    { name = "pyannote-audio", specifier = "==3.3.2" },
+    { name = "pyannote-audio", marker = "extra == 'diarization-pyannote'", specifier = "==3.3.2" },
+    { name = "pydub" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = "==8.4.1" },
+    { name = "pytorch-lightning" },
     { name = "soundfile" },
-    { name = "speechbrain", specifier = ">=1.0,<2.0" },
-    { name = "speechbrain", marker = "extra == 'cholimex'", specifier = ">=1.0,<2.0" },
-    { name = "speechbrain", marker = "extra == 'duplexchat'", specifier = ">=1.0,<2.0" },
-    { name = "speechbrain", marker = "extra == 'separation-sepformer'", specifier = ">=1.0,<2.0" },
-    { name = "torch" },
-    { name = "torchaudio" },
-    { name = "torchcodec" },
+    { name = "speechbrain", specifier = "==1.0.3" },
+    { name = "speechbrain", marker = "extra == 'cholimex'", specifier = "==1.0.3" },
+    { name = "speechbrain", marker = "extra == 'duplexchat'", specifier = "==1.0.3" },
+    { name = "speechbrain", marker = "extra == 'separation-sepformer'", specifier = "==1.0.3" },
+    { name = "torch", specifier = ">=2.7.0,<=2.8.0" },
+    { name = "torchaudio", specifier = ">=2.7.0,<=2.8.0" },
+    { name = "torchcodec", specifier = ">=0.6.0,<=0.7.0" },
     { name = "tqdm" },
-    { name = "wrapt", specifier = ">=2.4.0" },
+    { name = "transformers", specifier = ">=4.51.0,<=4.53.3" },
+    { name = "wrapt" },
 ]
-provides-extras = ["dev", "nisqa", "cholimex", "duplexchat", "diarization-pyannote", "diarization-sortformer", "separation-dialoguesidon", "separation-sepformer"]
+provides-extras = ["dev", "cholimex", "duplexchat", "diarization-pyannote", "diarization-sortformer", "separation-dialoguesidon", "separation-sepformer"]
 
 [[package]]
 name = "einops"
@@ -2365,6 +2378,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pyloudnorm"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/23/00/f915eaa75326f4209941179c2b93ac477f2040e4aeff5bb21d16eb8058f9/pyloudnorm-0.2.0.tar.gz", hash = "sha256:8bf597658ea4e1975c275adf490f6deb5369ea409f2901f939915efa4b681b16", size = 14037, upload-time = "2026-01-04T11:43:35.265Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/aa/b6/65a49a05614b2548edbba3aab118f2ebe7441dfd778accdcdce9f6567f20/pyloudnorm-0.2.0-py3-none-any.whl", hash = "sha256:9bb69afb904f59d007a7f9ba3d75d16fb8aeef35c44d6df822a9f192d69cf13f", size = 10879, upload-time = "2026-01-04T11:43:34.534Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2752,21 +2778,27 @@ name = "sommelier-runtime"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "asteroid-filterbanks" },
+    { name = "cython" },
     { name = "duplex-pipelines" },
     { name = "faster-whisper" },
     { name = "g2pk" },
     { name = "huggingface-hub" },
+    { name = "hydra-core" },
     { name = "librosa" },
     { name = "lightning" },
     { name = "loguru" },
     { name = "nemo-toolkit", extra = ["asr"] },
     { name = "numpy" },
+    { name = "omegaconf" },
     { name = "onnxruntime" },
     { name = "openai" },
+    { name = "packaging" },
     { name = "pandas" },
     { name = "panns-inference" },
     { name = "pyannote-audio" },
     { name = "pydub" },
+    { name = "pyloudnorm" },
     { name = "requests" },
     { name = "soundfile" },
     { name = "speechbrain" },
@@ -2774,34 +2806,42 @@ dependencies = [
     { name = "torchaudio" },
     { name = "torchmetrics" },
     { name = "tqdm" },
+    { name = "transformers" },
     { name = "tritony" },
     { name = "whisperx" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "asteroid-filterbanks" },
+    { name = "cython" },
     { name = "duplex-pipelines", editable = "../../" },
     { name = "faster-whisper", specifier = "==1.1.1" },
     { name = "g2pk" },
     { name = "huggingface-hub", specifier = "==0.33.4" },
+    { name = "hydra-core" },
     { name = "librosa" },
     { name = "lightning", specifier = "==2.4.0" },
     { name = "loguru" },
-    { name = "nemo-toolkit", extras = ["asr"] },
+    { name = "nemo-toolkit", extras = ["asr"], specifier = "==3.0.0" },
     { name = "numpy" },
+    { name = "omegaconf" },
     { name = "onnxruntime", specifier = "==1.22.1" },
     { name = "openai", specifier = "==1.97.1" },
-    { name = "pandas", specifier = "==2.3.1" },
-    { name = "panns-inference" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "panns-inference", specifier = "==0.1.1" },
     { name = "pyannote-audio", specifier = "==3.3.2" },
     { name = "pydub" },
-    { name = "requests", specifier = "==2.32.4" },
+    { name = "pyloudnorm" },
+    { name = "requests" },
     { name = "soundfile" },
     { name = "speechbrain", specifier = "==1.0.3" },
     { name = "torch", specifier = "==2.7.1" },
     { name = "torchaudio", specifier = "==2.7.1" },
     { name = "torchmetrics", specifier = "==1.7.4" },
     { name = "tqdm" },
+    { name = "transformers" },
     { name = "tritony", specifier = "==0.0.20" },
     { name = "whisperx", specifier = "==3.4.2" },
 ]
@@ -3162,13 +3202,12 @@ wheels = [
 
 [[package]]
 name = "torchcodec"
-version = "0.16.0"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d7/b9/d1780a0f5e3b4bcddec36e865ddec73b31047cf4fa8456e96c9f91852b12/torchcodec-0.16.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:9a899bf100cc40a0401fafc14f47c79979311d1df3fbe418c5d1019cde69d607", size = 3898046, upload-time = "2026-08-13T11:56:07.928Z" },
-    { url = "https://files.pythonhosted.org/packages/4e/b7/44004280d1e80c492af54d2d94332834091bc59e211827cfc0232aca03a3/torchcodec-0.16.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d26fe96259211115c17fb2bd071fbdf4da264cf04bb88fba006ffffb9c23c5a1", size = 8368173, upload-time = "2026-08-13T11:56:09.724Z" },
-    { url = "https://files.pythonhosted.org/packages/ca/5b/2a15225d77fc2ef857bd290a98f1de99f0db03e104f93ce3af7bea704f4a/torchcodec-0.16.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5309c29e31b719f81dba75fcfa49a9ce6a38d069d7f570767466fe634783e7ba", size = 9471149, upload-time = "2026-08-13T11:56:11.499Z" },
-    { url = "https://files.pythonhosted.org/packages/0f/77/00f106e48bc20d9e3e72e85077849eabc3a5ae9839ce0df961d48424747d/torchcodec-0.16.0-cp312-cp312-win_amd64.whl", hash = "sha256:d9e4c83b3c02b206b24a5409746babd74ed00bfa0a6320b23714d73c61124397", size = 6427551, upload-time = "2026-08-13T11:56:13.682Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/b2/6d3e190fcd18c65b35f6da734d4415c72b42c8a72ffc2494d998bad8caf3/torchcodec-0.7.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d9d082bbb599f4f7715bfc3b1afa5bc16d8fb9d852e68084c63f1973cc78a1cb", size = 3574506, upload-time = "2025-09-08T14:17:52.071Z" },
+    { url = "https://files.pythonhosted.org/packages/41/10/4a1a8407d0fad37cb43d1f749e7b422e5a0f6def17f3b90ab9ab9a105e32/torchcodec-0.7.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:3cd23c3296c9b071d56bb2c534a6a98275d65c1a6a7213cdb72a26ec9f9d2fd8", size = 1421871, upload-time = "2025-09-08T14:17:43.419Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/e7/a2fa7ed9c81d7d683d37ca7204007b421c0537132364a9cfd8d577f19a96/torchcodec-0.7.0-cp312-cp312-win_amd64.whl", hash = "sha256:ac942831bff02e6041d8718b71c6f63e4e37c05dd95e72863725c9dbef0d4a7b", size = 1565029, upload-time = "2025-09-08T14:18:02.83Z" },
 ]
 
 [[package]]

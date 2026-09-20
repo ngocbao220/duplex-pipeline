@@ -48,4 +48,3 @@ duplex-pipelines = { path = "../..", editable = true }
 
 [tool.uv.extra-build-dependencies]
 youtokentome = ["Cython"]
-
