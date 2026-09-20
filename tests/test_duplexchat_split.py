@@ -133,6 +133,50 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
     assert (output_root / "dialogue_1.wav").is_file()
     assert "reason" in manifest["dialogues"][0]
     assert "accepted_standard_2_speaker_dialogue" in manifest["dialogues"][0]["reason"]
+    assert manifest["filter_summary"]["candidate_dialogue_count"] == 1
+    assert manifest["filter_summary"]["exported_dialogue_count"] == 1
+    assert manifest["filter_summary"]["lid"]["enabled"] is False
+    assert manifest["candidate_dialogues"][0]["decision"] == "exported"
+
+
+def test_split_valid_dialogues_records_each_lid_rejection(monkeypatch, tmp_path):
+    from duplexchat import language_id
+
+    output_root = tmp_path / "output_split"
+    source_wav = tmp_path / "source.wav"
+    source_wav.write_bytes(b"placeholder")
+    segments = [_segment("A", 0.0, 6.0), _segment("B", 6.0, 12.0)]
+
+    monkeypatch.setattr(runner, "prepare_input", lambda *_args: source_wav)
+    monkeypatch.setattr(runner, "diarize", lambda *_args, **_kwargs: (object(), segments))
+    monkeypatch.setattr(runner, "load_wav_tensor", lambda *_args: (torch.zeros(1, 12 * 16_000), 16_000))
+
+    class _RejectingLID:
+        def is_vietnamese(self, *_args, **_kwargs):
+            return False, 0.2
+
+    monkeypatch.setattr(language_id, "load_whisper_lid_model", lambda **_kwargs: _RejectingLID())
+
+    manifest = runner.split_valid_dialogues(
+        str(source_wav), output_dir=str(output_root), filter_music=False, filter_vietnamese=True,
+    )
+
+    assert manifest["dialogue_count"] == 0
+    assert manifest["filter_summary"]["rejected_by_lid"] == 1
+    assert manifest["filter_summary"]["lid"] == {
+        "enabled": True,
+        "model": "openai/whisper-small",
+        "min_vi_probability": 0.5,
+    }
+    assert manifest["candidate_dialogues"] == [{
+        "candidate_index": 1,
+        "start": 0.0,
+        "end": 12.0,
+        "duration": 12.0,
+        "vietnamese_probability": 0.2,
+        "reason": "accepted_standard_2_speaker_dialogue",
+        "decision": "rejected_by_lid",
+    }]
 
 
 def test_separate_dialogue_files(monkeypatch, tmp_path):
@@ -166,5 +210,4 @@ def test_separate_dialogue_files(monkeypatch, tmp_path):
     with wave.open(str(output_dir / "stereo_1.wav")) as audio:
         assert audio.getnchannels() == 2
         assert audio.getframerate() == 24_000
-
 

@@ -368,6 +368,7 @@ def split_valid_dialogues(
 
     output_root.mkdir(parents=True, exist_ok=True)
     dialogue_info = []
+    candidate_dialogues = []
     output_dialogue_idx = 1
     lid_rejected_count = 0
 
@@ -384,6 +385,15 @@ def split_valid_dialogues(
             is_vi, vi_prob = lid_filter.is_vietnamese(crop, sample_rate, min_prob=min_vi_prob)
             if not is_vi:
                 lid_rejected_count += 1
+                candidate_dialogues.append({
+                    "candidate_index": index + 1,
+                    "start": dialogue.start,
+                    "end": dialogue.end,
+                    "duration": dialogue.end - dialogue.start,
+                    "vietnamese_probability": round(vi_prob, 4),
+                    "reason": dialogue.reason,
+                    "decision": "rejected_by_lid",
+                })
                 logger.info("++++ 1 Skipped by Whisper LID (Vietnamese probability %.3f < %.3f)", vi_prob, min_vi_prob)
                 continue
 
@@ -400,6 +410,16 @@ def split_valid_dialogues(
             "duration": dialogue.end - dialogue.start,
             "vietnamese_probability": round(vi_prob, 4),
             "reason": dialogue.reason,
+        })
+        candidate_dialogues.append({
+            "candidate_index": index + 1,
+            "start": dialogue.start,
+            "end": dialogue.end,
+            "duration": dialogue.end - dialogue.start,
+            "vietnamese_probability": round(vi_prob, 4),
+            "reason": dialogue.reason,
+            "decision": "exported",
+            "filename": dialogue_filename,
         })
         output_dialogue_idx += 1
 
@@ -434,6 +454,20 @@ def split_valid_dialogues(
         "filter_vietnamese": filter_vietnamese,
         "lid_model": lid_model if filter_vietnamese else None,
         "min_vi_prob": min_vi_prob if filter_vietnamese else None,
+        "filter_summary": {
+            "candidate_dialogue_count": len(dialogues),
+            "exported_dialogue_count": len(dialogue_info),
+            "rejected_by_lid": lid_rejected_count,
+            "rejected_short": summary.get("rejected_short", 0),
+            "rejected_imbalanced": summary.get("rejected_imbalanced", 0),
+            "diarized_speaker_count": summary.get("speakers", 0),
+            "lid": {
+                "enabled": filter_vietnamese,
+                "model": lid_model if filter_vietnamese else None,
+                "min_vi_probability": min_vi_prob if filter_vietnamese else None,
+            },
+        },
+        "candidate_dialogues": candidate_dialogues,
         "dialogues": dialogue_info,
         "phase_times": phase_times,
     }
@@ -566,5 +600,4 @@ def separate_dialogue_files(
         "elapsed_sec": elapsed,
         "rtf": rtf,
     }
-
 

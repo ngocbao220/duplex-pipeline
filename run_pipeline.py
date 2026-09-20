@@ -65,8 +65,9 @@ def _setup_runtime_environment(cfg: DictConfig) -> dict[str, str]:
 
     # PYTHONPATH
     duplex_src = str(ROOT_DIR / "pipeline" / "duplexchat" / "src")
+    cholimex_src = str(ROOT_DIR / "pipeline" / "cholimex" / "src")
     existing_pythonpath = env.get("PYTHONPATH", "")
-    paths = [str(ROOT_DIR), duplex_src]
+    paths = [str(ROOT_DIR), duplex_src, cholimex_src]
     if existing_pythonpath:
         paths.append(existing_pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(paths)
@@ -96,6 +97,15 @@ def _run_cmd(cmd: list[str], env: dict[str, str], dry_run: bool = False) -> int:
     return res.returncode
 
 
+def _append_resource_tuning_args(cmd: list[str], cfg: DictConfig) -> None:
+    optimization = cfg.get("optimization", {})
+    cmd.extend([
+        "--resource-mode", str(optimization.get("resource_mode", "auto")),
+        "--gpu-memory-reserve-ratio", str(optimization.get("gpu_memory_reserve_ratio", 0.10)),
+        "--max-workers-per-gpu", str(optimization.get("max_workers_per_gpu", 8)),
+    ])
+
+
 def step_convert(cfg: DictConfig, env: dict[str, str]) -> int:
     """Step 0: Convert crawled audio files to 16kHz mono WAV."""
     crawl_dir = Path(cfg.data.crawl_dir)
@@ -106,7 +116,9 @@ def step_convert(cfg: DictConfig, env: dict[str, str]) -> int:
         return 0
 
     print(section("Convert Audio to WAV"))
-    convert_workers = cfg.get("optimization", {}).get("convert_workers", 8)
+    convert_workers = cfg.get("optimization", {}).get("convert_workers", "auto")
+    if str(convert_workers).lower() == "auto":
+        convert_workers = os.cpu_count() or 1
     cmd = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "convert_crawl_to_raw.py"),
@@ -127,7 +139,7 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         logger.info("Raw directory %s does not exist. Skipping dialogue split step.", raw_dir)
         return 0
 
-    workers = cfg.get("optimization", {}).get("workers", 2)
+    workers = cfg.get("workers") or cfg.get("optimization", {}).get("workers", 2)
     cmd = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "run_pipeline_batch.py"),
@@ -138,6 +150,7 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         "--pattern", str(cfg.data.get("pattern", "*.wav")),
         "--workers", str(workers),
     ]
+    _append_resource_tuning_args(cmd, cfg)
 
     split_cfg = cfg.get("dialogue_split") or cfg.get("pipeline", {})
 
@@ -150,11 +163,13 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         if diar_cfg.get("model"):
             cmd.extend(["--diarization-model", str(diar_cfg.model)])
         max_chunk = (
-            diar_cfg.get("max_chunk_seconds")
+            cfg.get("max_chunk_seconds")
+            or (diar_cfg.get("max_chunk_seconds") if diar_cfg.get("max_chunk_seconds") != "full" else None)
             or diar_cfg.get("chunk_duration")
-            or global_diar.get("max_chunk_seconds")
+            or (global_diar.get("max_chunk_seconds") if global_diar.get("max_chunk_seconds") != "full" else None)
             or global_diar.get("chunk_duration")
-            or cfg.get("max_chunk_seconds")
+            or diar_cfg.get("max_chunk_seconds")
+            or global_diar.get("max_chunk_seconds")
         )
         if max_chunk is not None:
             cmd.extend(["--diarize-chunk", str(max_chunk)])
@@ -172,6 +187,8 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     lid_cfg = split_cfg.get("lid", {})
     if lid_cfg.get("enabled", False) and lid_cfg.get("code"):
         cmd.extend(["--lid", str(lid_cfg.code)])
+        if lid_cfg.get("min_prob") is not None:
+            cmd.extend(["--min-lid-prob", str(lid_cfg.min_prob)])
 
     if cfg.dry_run:
         cmd.append("--dry-run")
@@ -190,7 +207,7 @@ def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         return 0
 
     sep_chunk = cfg.pipeline.get("separation", {}).get("chunk", 60.0)
-    workers = cfg.get("optimization", {}).get("workers", 2)
+    workers = cfg.get("workers") or cfg.get("optimization", {}).get("workers", 2)
 
     cmd = [
         sys.executable,
@@ -202,6 +219,7 @@ def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         "--separation-chunk", str(sep_chunk),
         "--workers", str(workers),
     ]
+    _append_resource_tuning_args(cmd, cfg)
 
     sep_model = cfg.pipeline.get("separation", {}).get("model")
     if sep_model:
@@ -225,7 +243,7 @@ def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
         logger.info("Raw input directory %s does not exist. Skipping Sommelier step.", input_dir)
         return 0
 
-    workers = cfg.get("optimization", {}).get("workers", 2)
+    workers = cfg.get("workers") or cfg.get("optimization", {}).get("workers", 2)
     cmd = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "run_pipeline_batch.py"),
@@ -235,6 +253,7 @@ def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
         "--gpu", str(cfg.gpu),
         "--workers", str(workers),
     ]
+    _append_resource_tuning_args(cmd, cfg)
 
     if cfg.dry_run:
         cmd.append("--dry-run")
@@ -242,11 +261,44 @@ def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
     return _run_cmd(cmd, env, dry_run=cfg.dry_run)
 
 
+def step_cholimex(cfg: DictConfig, env: dict[str, str]) -> int:
+    """Refine each DuplexChat stereo clip using its matching dialogue mixture."""
+    print(section("Cholimex Refinement"))
+    duplex_dir = Path(cfg.data.duplex_out_dir)
+    dialogue_dir = Path(cfg.data.dialogue_dir)
+    cholimex_out_dir = Path(cfg.data.cholimex_out_dir)
+
+    if (not duplex_dir.exists() or not dialogue_dir.exists()) and not cfg.dry_run:
+        logger.info("DuplexChat stereo or dialogue mixture directory is missing. Skipping Cholimex refinement.")
+        return 0
+
+    workers = cfg.get("workers") or cfg.get("optimization", {}).get("workers", 2)
+    cmd = [
+        sys.executable,
+        str(ROOT_DIR / "scripts" / "run_pipeline_batch.py"),
+        "--step", "cholimex",
+        "--input-dir", str(duplex_dir),
+        "--mixture-dir", str(dialogue_dir),
+        "--output-dir", str(cholimex_out_dir),
+        "--gpu", str(cfg.gpu),
+        "--workers", str(workers),
+    ]
+    _append_resource_tuning_args(cmd, cfg)
+    if cfg.dry_run:
+        cmd.append("--dry-run")
+    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+
+
 def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
     """Phase 3: Stereo Benchmark & Data Retention Reporting."""
     print(section("Stereo Benchmark"))
     pipeline_name = str(cfg.pipeline.name)
-    corpus_dir = Path(cfg.data.duplex_out_dir if pipeline_name == "duplexchat" else cfg.data.sommelier_out_dir)
+    corpus_dirs = {
+        "duplexchat": cfg.data.duplex_out_dir,
+        "sommelier": cfg.data.sommelier_out_dir,
+        "cholimex": cfg.data.cholimex_out_dir,
+    }
+    corpus_dir = Path(corpus_dirs[pipeline_name])
     bench_out_dir = Path(cfg.benchmark.output_dir)
     dnsmos_dir = Path(cfg.benchmark.dnsmos_dir)
 
@@ -254,7 +306,7 @@ def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
         logger.info("Corpus directory %s does not exist. Skipping benchmark step.", corpus_dir)
         return 0
 
-    workers = cfg.get("optimization", {}).get("workers", 2)
+    workers = cfg.get("workers") or cfg.get("optimization", {}).get("workers", 2)
     cmd = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "benchmark_stereo.py"),
@@ -377,6 +429,9 @@ def main(cfg: DictConfig) -> None:
     elif step == "sommelier":
         sys.exit(step_sommelier(cfg, env))
 
+    elif step == "cholimex":
+        sys.exit(step_cholimex(cfg, env))
+
     elif step == "benchmark":
         sys.exit(step_benchmark(cfg, env))
 
@@ -410,10 +465,24 @@ def main(cfg: DictConfig) -> None:
                 logger.error("Benchmark step failed.")
                 sys.exit(1)
 
+        elif pipeline_name == "cholimex":
+            if step_split_dialogue(cfg, env) != 0:
+                logger.error("Dialogue filtering step failed.")
+                sys.exit(1)
+            if step_separate_dialogue(cfg, env) != 0:
+                logger.error("DuplexChat separation step failed.")
+                sys.exit(1)
+            if step_cholimex(cfg, env) != 0:
+                logger.error("Cholimex refinement step failed.")
+                sys.exit(1)
+            if step_benchmark(cfg, env) != 0:
+                logger.error("Benchmark step failed.")
+                sys.exit(1)
+
         logger.info("All pipeline phases completed successfully.")
 
     else:
-        logger.error("Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_dialogue | sommelier | benchmark", step)
+        logger.error("Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | benchmark", step)
         sys.exit(1)
 
 

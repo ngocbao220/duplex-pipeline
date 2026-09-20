@@ -166,6 +166,19 @@ def test_sommelier_pipeline_declares_max_chunk_duration():
     assert somm_cfg.get("max_chunk_duration") == 300.0
 
 
+def test_hydra_config_declares_cholimex_as_a_refinement_output():
+    root = Path(__file__).resolve().parents[1]
+    import yaml
+
+    with open(root / "configs" / "config.yaml", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    with open(root / "configs" / "pipeline" / "cholimex.yaml", encoding="utf-8") as f:
+        cholimex = yaml.safe_load(f)
+
+    assert config["data"]["cholimex_out_dir"] == "${env.paths.base_output}/cholimex/${data.source}"
+    assert cholimex["name"] == "cholimex"
+
+
 def test_setup_env_has_no_external_index_url():
     root = Path(__file__).resolve().parents[1]
     setup_script = (root / "setup_env.sh").read_text()
@@ -206,4 +219,3 @@ def test_core_runtime_dependencies_are_pinned():
     somm_req = (root / "requirements-sommelier.txt").read_text()
     assert "torch==2.7.1" in somm_req
     assert "nemo_toolkit[asr]==3.0.0" in somm_req
-

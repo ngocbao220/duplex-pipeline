@@ -9,8 +9,8 @@ defaults:
   - _self_
 
 # Execution controls
-step: all               # Options: all | convert | split_dialogue | separate_dialogue | sommelier | benchmark
-gpu: auto                  # Target GPU ID: auto (detects all available GPUs) | "0,1" | 0 | 1
+step: all               # Options: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | benchmark
+gpu: 0                # Target GPU ID: auto (detects all available GPUs) | "0,1" | 0 | 1
 debug: false            # Write intermediate debug audio/artifacts
 dry_run: false          # Print execution commands without running
 
@@ -22,6 +22,7 @@ data:
   dialogue_dir: ${env.paths.base_output}/dialogue/${data.source}
   duplex_out_dir: ${env.paths.base_output}/duplexchat/${data.source}
   sommelier_out_dir: ${env.paths.base_output}/sommelier/${data.source}
+  cholimex_out_dir: ${env.paths.base_output}/cholimex/${data.source}
   pattern: "*.wav"
 
 # Shared Runtime Settings
@@ -31,6 +32,9 @@ runtime:
 
 # Concurrency & Performance Optimization (Tuned for GPU A100 40GB)
 optimization:
-  workers: 2               # Parallel workers on GPU (A100 40GB supports 2-4 concurrent tasks)
-  convert_workers: 8       # Parallel ffmpeg workers on CPU
+  resource_mode: auto      # auto calibrates GPU file concurrency from observed peak VRAM; manual uses workers
+  workers: 2               # Manual fallback workers per GPU
+  max_workers_per_gpu: 8   # Hard upper bound for auto-tuned file concurrency
+  gpu_memory_reserve_ratio: 0.10  # Conservative VRAM reserve during auto-tune
+  convert_workers: auto    # Use all logical CPU cores for one-thread ffmpeg conversion
   threads_per_worker: 1    # Enforce strictly 1 CPU thread per worker process (CPU <= 100%)

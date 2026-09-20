@@ -1,9 +1,10 @@
 # Requirements for Sommelier Conda Environment (Offline/Server compatible)
 # Python: >=3.10, <=3.12
 
-torch==2.7.1
-torchaudio==2.7.1
-torchmetrics==1.7.4
+# Core PyTorch Stack (Giữ cố định bộ ba 2.8.0 để đảm bảo C++ ABI)
+torch==2.8.0
+torchaudio==2.8.0
+torchvision==0.23.0
 
 # Audio processing
 soundfile
@@ -14,27 +15,26 @@ asteroid-filterbanks
 numpy
 
 # Diarization & Speaker linking
-pyannote.audio==3.3.2
-speechbrain==1.0.3
+pyannote.audio>=3.1.0
+speechbrain>=1.0.0
 Cython
 packaging
-nemo_toolkit[asr]==3.0.0
+nemo_toolkit[asr]>=2.0.0
 omegaconf
 hydra-core
-transformers
+transformers>=4.40.0
 
 # Sommelier pipeline models & runtime
-panns-inference==0.1.1
+panns-inference
 loguru
-lightning==2.4.0
+lightning>=2.1.0
 pandas
 requests
 tqdm
-huggingface-hub==0.33.4
-onnxruntime==1.22.1
-openai==1.97.1
-tritony==0.0.20
+huggingface-hub
+onnxruntime
+openai
+tritony
 g2pk
-faster-whisper==1.1.1
-whisperx==3.4.2
-
+faster-whisper
+whisperx

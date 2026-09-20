@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+from core.resource_tuning import GpuSnapshot
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -83,3 +85,151 @@ def test_batch_timing_records_failed_subprocess_and_dry_run_writes_nothing(monke
     monkeypatch.setattr(sys, "argv", ["run_pipeline_batch.py", "--step", "split_dialogue", "--input-dir", str(raw_dir), "--output-dir", str(tmp_path / "split"), "--dry-run"])
     batch.run_batch()
     assert not (tmp_path / "outputs" / "pipeline_timing.json").exists()
+
+
+def test_split_dialogue_report_counts_lid_decisions_and_lists_rejected_audio(tmp_path):
+    batch = _batch_module()
+    output_dir = tmp_path / "dialogues"
+    accepted = output_dir / "accepted"
+    rejected = output_dir / "rejected"
+    accepted.mkdir(parents=True)
+    rejected.mkdir()
+    (accepted / "manifest.json").write_text(json.dumps({
+        "source_audio": "/input/accepted.wav",
+        "dialogue_count": 1,
+        "skip_reason": None,
+        "filter_summary": {
+            "candidate_dialogue_count": 2,
+            "exported_dialogue_count": 1,
+            "rejected_by_lid": 1,
+            "rejected_short": 3,
+            "rejected_imbalanced": 2,
+            "diarized_speaker_count": 2,
+            "lid": {"enabled": True, "model": "/models/whisper", "min_vi_probability": 0.5},
+        },
+    }), encoding="utf-8")
+    (rejected / "manifest.json").write_text(json.dumps({
+        "source_audio": "/input/rejected.wav",
+        "dialogue_count": 0,
+        "skip_reason": "All 1 candidate clips rejected by Whisper LID",
+        "filter_summary": {
+            "candidate_dialogue_count": 1,
+            "exported_dialogue_count": 0,
+            "rejected_by_lid": 1,
+            "rejected_short": 0,
+            "rejected_imbalanced": 0,
+            "diarized_speaker_count": 2,
+            "lid": {"enabled": True, "model": "/models/whisper", "min_vi_probability": 0.5},
+        },
+    }), encoding="utf-8")
+
+    report = batch._summarize_split_dialogue_manifests(output_dir, input_audio_count=2)
+
+    assert report["lid"]["enabled"] is True
+    assert report["lid"]["model"] == "/models/whisper"
+    assert report["counts"] == {
+        "input_audio": 2,
+        "manifest_audio": 2,
+        "candidate_dialogues": 3,
+        "exported_dialogues": 1,
+        "rejected_by_lid": 2,
+        "rejected_short": 3,
+        "rejected_imbalanced": 2,
+        "monologue_audio": 0,
+        "zero_dialogue_audio": 1,
+    }
+    assert report["audio"][1]["source_audio"] == "/input/rejected.wav"
+    assert report["audio"][1]["skip_reason"] == "All 1 candidate clips rejected by Whisper LID"
+
+
+def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(monkeypatch, tmp_path):
+    batch = _batch_module()
+    raw_dir = tmp_path / "raw"
+    output_dir = tmp_path / "dialogues"
+    raw_dir.mkdir()
+    source = raw_dir / "source.wav"
+    source.write_bytes(b"raw")
+    commands = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        worker_output = Path(command[command.index("--output-dir") + 1])
+        worker_output.mkdir(parents=True)
+        (worker_output / "manifest.json").write_text(json.dumps({
+            "source_audio": str(source),
+            "dialogue_count": 0,
+            "skip_reason": "All 1 candidate clips rejected by Whisper LID",
+            "filter_summary": {
+                "candidate_dialogue_count": 1,
+                "exported_dialogue_count": 0,
+                "rejected_by_lid": 1,
+                "rejected_short": 0,
+                "rejected_imbalanced": 0,
+                "diarized_speaker_count": 2,
+                "lid": {"enabled": True, "model": "local-whisper", "min_vi_probability": 0.7},
+            },
+        }), encoding="utf-8")
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(batch.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch, "_audio_duration_seconds", lambda _path: 10.0)
+    monkeypatch.setattr(sys, "argv", [
+        "run_pipeline_batch.py", "--step", "split_dialogue", "--input-dir", str(raw_dir),
+        "--output-dir", str(output_dir), "--lid", "vi", "--min-lid-prob", "0.7",
+    ])
+
+    batch.run_batch()
+
+    command = next(command for command in commands if "--lid" in command)
+    assert ["--lid", "vi", "--min-lid-prob", "0.7"] == command[command.index("--lid"):command.index("--lid") + 4]
+    report = json.loads((output_dir / "split_dialogue_report.json").read_text())
+    assert report["lid"] == {"enabled": True, "model": "local-whisper", "min_vi_probability": 0.7}
+    assert report["counts"]["rejected_by_lid"] == 1
+
+
+def test_cholimex_dry_run_pairs_each_duplexchat_stereo_with_its_dialogue_mixture(monkeypatch, capsys, tmp_path):
+    batch = _batch_module()
+    duplex_dir = tmp_path / "duplexchat"
+    dialogue_dir = tmp_path / "dialogues"
+    (duplex_dir / "episode").mkdir(parents=True)
+    (dialogue_dir / "episode").mkdir(parents=True)
+    (duplex_dir / "episode" / "stereo_1.wav").write_bytes(b"stereo")
+    (dialogue_dir / "episode" / "dialogue_1.wav").write_bytes(b"mixture")
+
+    monkeypatch.setattr(sys, "argv", [
+        "run_pipeline_batch.py",
+        "--step", "cholimex", "--input-dir", str(duplex_dir),
+        "--mixture-dir", str(dialogue_dir), "--output-dir", str(tmp_path / "cholimex"), "--dry-run",
+    ])
+    batch.run_batch()
+    output = capsys.readouterr().out
+
+    assert "stereo_1.wav" in output
+    assert "dialogue_1.wav" in output
+    assert "-m cholimex collection" in output
+
+
+def test_auto_tuning_calibrates_before_expanding_gpu_workers(monkeypatch):
+    batch = _batch_module()
+    snapshot = GpuSnapshot(index="0", total_memory_mib=40_000, free_memory_mib=38_000)
+
+    class _Sampler:
+        def start(self):
+            return None
+
+        def stop(self):
+            return {"0": GpuSnapshot(index="0", total_memory_mib=40_000, free_memory_mib=34_000, peak_memory_used_mib=6_000)}
+
+    monkeypatch.setattr(batch, "probe_gpus", lambda: [snapshot])
+    monkeypatch.setattr(batch, "GpuMemorySampler", _Sampler)
+    calls = []
+
+    results, plan = batch._run_gpu_items(
+        [1, 2, 3], ["0"], lambda item, gpu: calls.append((item, gpu)) or item,
+        resource_mode="auto", configured_workers_per_gpu=1, reserve_ratio=0.10, max_workers_per_gpu=8,
+    )
+
+    assert results == [1, 2, 3]
+    assert calls[0] == (1, "0")
+    assert plan["workers_per_gpu"] == {"0": 6}

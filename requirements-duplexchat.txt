@@ -2,18 +2,20 @@
 # Python: >=3.10, <=3.12
 # PyTorch: 2.8.x
 
+# Core PyTorch Stack (Giữ cố định bộ ba 2.8.0 để tránh lệch C++ ABI)
 torch==2.8.0
 torchaudio==2.8.0
+torchvision==0.23.0
 
 # Audio I/O and processing
 soundfile
 pydub
 librosa
-demucs==4.0.1
+demucs>=4.0.0
 
 # Diarization backends & Speaker Embedding
-pyannote.audio==3.3.2
-speechbrain==1.0.3
+pyannote.audio>=3.1.0
+speechbrain>=1.0.0
 
 # Neural Audio / NeMo for Sortformer
 Cython
@@ -21,12 +23,12 @@ packaging
 omegaconf
 hydra-core
 pytorch-lightning
-transformers>=4.51.0,<=4.53.3
-nemo_toolkit[asr]==2.3.0
+transformers>=4.40.0
+nemo_toolkit[asr]>=2.0.0
 
 # Separation Backend (DialogueSidon)
-diffusers<=0.30.0
-huggingface-hub==0.33.4
+diffusers
+huggingface-hub
 wrapt
 onnxruntime
 numpy
@@ -34,4 +36,3 @@ numpy
 # Utilities
 tqdm
 pytest
-
