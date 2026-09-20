@@ -49,12 +49,29 @@ while [[ $# -gt 0 ]]; do
             GPU_ID="$2"
             shift 2
             ;;
+        gpu=*)
+            GPU_ID="${1#gpu=}"
+            shift
+            ;;
         --dev)
             MODE="dev"
             shift
             ;;
+        env=*)
+            MODE="${1#env=}"
+            shift
+            ;;
         --sever|--server)
             MODE="sever"
+            shift
+            ;;
+        --max-chunk-seconds|--diarize-chunk)
+            HYDRA_ARGS+=("diarization.max_chunk_seconds=$2")
+            shift 2
+            ;;
+        max_chunk_seconds=*|+max_chunk_seconds=*)
+            val="${1#*=}"
+            HYDRA_ARGS+=("diarization.max_chunk_seconds=$val")
             shift
             ;;
         --workers|-w)

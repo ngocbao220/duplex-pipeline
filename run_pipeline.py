@@ -143,14 +143,22 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
 
     # Diarization
     diar_cfg = split_cfg.get("diarization") or cfg.get("diarization", {})
+    global_diar = cfg.get("diarization", {})
     if diar_cfg:
         if diar_cfg.get("backend"):
             cmd.extend(["--diarization-backend", str(diar_cfg.backend)])
         if diar_cfg.get("model"):
             cmd.extend(["--diarization-model", str(diar_cfg.model)])
-        max_chunk = diar_cfg.get("max_chunk_seconds") or diar_cfg.get("chunk_duration")
+        max_chunk = (
+            diar_cfg.get("max_chunk_seconds")
+            or diar_cfg.get("chunk_duration")
+            or global_diar.get("max_chunk_seconds")
+            or global_diar.get("chunk_duration")
+            or cfg.get("max_chunk_seconds")
+        )
         if max_chunk is not None:
             cmd.extend(["--diarize-chunk", str(max_chunk)])
+
 
 
     # Music filtering
