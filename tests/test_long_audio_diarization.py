@@ -91,3 +91,39 @@ def test_run_diarization_adapter_flow(tmp_path):
     assert len(results) == 2
     assert results[0]["speaker"] == "SPEAKER_00"
     assert results[1]["speaker"] == "SPEAKER_01"
+
+
+def test_sortformer_adapter_full_chunk_mode(tmp_path):
+    import soundfile as sf
+    import numpy as np
+    from duplexchat.diarization_backend import SortformerDiarizationAdapter
+
+    # Create a 30-second test wav
+    wav_path = tmp_path / "long_audio.wav"
+    data = np.zeros(16000 * 30, dtype=np.float32)
+    sf.write(str(wav_path), data, 16000)
+
+    class MockSortformerModel:
+        def __init__(self):
+            self.calls = []
+        def diarize(self, audio, batch_size=1):
+            self.calls.append(audio)
+            return ["0.0 5.0 speaker_0", "5.0 10.0 speaker_1"]
+
+    # 1. Full mode: should have max_chunk_duration = inf and call diarize once on the full file
+    mock_model = MockSortformerModel()
+    adapter_full = SortformerDiarizationAdapter(mock_model, max_chunk_duration="full")
+    assert adapter_full.max_chunk_duration == float("inf")
+
+    res = adapter_full.diarize_file(wav_path)
+    assert len(mock_model.calls) == 1
+    assert mock_model.calls[0] == str(wav_path)
+    assert len(res) == 2
+
+    # 2. Case-insensitive "FULL" or None or 0
+    adapter_upper = SortformerDiarizationAdapter(mock_model, max_chunk_duration="FULL")
+    assert adapter_upper.max_chunk_duration == float("inf")
+
+    adapter_none = SortformerDiarizationAdapter(mock_model, max_chunk_duration=None)
+    assert adapter_none.max_chunk_duration == float("inf")
+

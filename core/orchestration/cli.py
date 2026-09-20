@@ -35,7 +35,7 @@ def build_pipeline_parser(name: str) -> argparse.ArgumentParser:
         split.add_argument("--input", type=Path, required=True)
         split.add_argument("--output-dir", type=Path, required=True)
         split.add_argument("--debug", action="store_true")
-        split.add_argument("--diarize-chunk", type=float, default=None)
+        split.add_argument("--diarize-chunk", type=str, default=None, help="Max diarization chunk in seconds, or 'full' to process entire audio without chunking")
         split.add_argument("--device-ids", type=int, nargs="+")
         split.add_argument("--filter-music", action="store_true", default=True)
         split.add_argument("--no-filter-music", dest="filter_music", action="store_false")

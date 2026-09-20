@@ -31,6 +31,15 @@ except Exception:
 
 def _suppress_nemo_logs() -> None:
     """Tắt NeMo W/I logs không liên quan đến lỗi thực sự."""
+    warnings.filterwarnings("ignore", message=r".*If you intend to do training or fine-tuning.*")
+    warnings.filterwarnings("ignore", message=r".*setup_training_data.*")
+    warnings.filterwarnings("ignore", message=r".*ModelPT.*")
+    try:
+        from nemo.utils import logging as nemo_logging
+        nemo_logging.setLevel(logging.ERROR)
+        nemo_logging.set_verbosity(logging.ERROR)
+    except Exception:
+        pass
     for name in (
         "nemo_logging",
         "nemo",
@@ -44,6 +53,9 @@ def _suppress_nemo_logs() -> None:
         "huggingface_hub.utils",
     ):
         logging.getLogger(name).setLevel(logging.ERROR)
+
+_suppress_nemo_logs()
+
 
 import torch
 import torch.nn.functional as F
@@ -93,9 +105,16 @@ def _disable_sortformer_streaming_mode(model: Any) -> None:
 class SortformerDiarizationAdapter(FileDiarizationAdapter):
     backend = "sortformer"
 
-    def __init__(self, model: Any, max_chunk_duration: float = 120.0):
+    def __init__(self, model: Any, max_chunk_duration: float | str | None = 120.0):
         self.model = model
-        self.max_chunk_duration = max_chunk_duration
+        if max_chunk_duration is None or str(max_chunk_duration).strip().lower() in ("full", "none", "inf"):
+            self.max_chunk_duration = float("inf")
+        else:
+            try:
+                val = float(max_chunk_duration)
+                self.max_chunk_duration = float("inf") if val <= 0 else val
+            except (ValueError, TypeError):
+                self.max_chunk_duration = float("inf")
 
     def _diarize_single(self, wav_path_str: str) -> list[dict]:
         with torch.inference_mode():
@@ -121,11 +140,11 @@ class SortformerDiarizationAdapter(FileDiarizationAdapter):
             duration = None
             sample_rate = 16000
 
-        # Nếu audio ngắn hơn max_chunk_duration (<= 120s), diarize trực tiếp
-        if duration is not None and duration <= self.max_chunk_duration:
+        # Nếu max_chunk_duration là inf ("full") hoặc audio ngắn hơn max_chunk_duration, diarize trực tiếp toàn bộ
+        if self.max_chunk_duration == float("inf") or (duration is not None and duration <= self.max_chunk_duration):
             return self._diarize_single(str(wav_path))
 
-        # Audio dài (> 120s): xử lý theo chunk 120s để triệt tiêu hoàn toàn nguy cơ CUDA OOM
+        # Audio dài (> max_chunk_duration): xử lý theo chunk để tiết kiệm VRAM
         segments: list[dict] = []
         chunk_samples = int(self.max_chunk_duration * sample_rate)
 
@@ -186,13 +205,14 @@ def load_diarization_pipeline(
     model: str,
     device: str = "cuda",
     backend: str = "auto",
+    max_chunk_duration: float | str | None = None,
 ) -> "Pipeline | FileDiarizationAdapter":
     model = resolve_model_alias(model, DIARIZATION_MODELS) or model
     backend_norm = backend.strip().lower()
     if backend_norm == "auto":
         backend_norm = infer_diarization_backend(model)
     if backend_norm == "sortformer":
-        return _load_sortformer_pipeline(model, device)
+        return _load_sortformer_pipeline(model, device, max_chunk_duration=max_chunk_duration)
     if backend_norm == "diarizen":
         return _load_diarizen_pipeline(model, device)
     if backend_norm != "pyannote":
@@ -241,7 +261,11 @@ def _load_pyannote_pipeline(model: str, device: str = "cuda") -> "Pipeline":
     return pipeline
 
 
-def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDiarizationAdapter:
+def _load_sortformer_pipeline(
+    model: str,
+    device: str = "cuda",
+    max_chunk_duration: float | str | None = None,
+) -> SortformerDiarizationAdapter:
     enforce_offline_mode()
     local_target, is_local = resolve_local_model_path(
         model, env_var="SORTFORMER_MODEL_PATH", default_subpath="diar_streaming_sortformer_4spk-v2.1"
@@ -399,7 +423,12 @@ def _load_sortformer_pipeline(model: str, device: str = "cuda") -> SortformerDia
     resolved_device = _resolve_device(device)
     if hasattr(diar_model, "to"):
         diar_model.to(torch.device(resolved_device))
-    return SortformerDiarizationAdapter(diar_model)
+    env_chunk = os.environ.get("SORTFORMER_MAX_CHUNK_SECONDS") or os.environ.get("MAX_CHUNK_SECONDS")
+    chunk_dur = max_chunk_duration if max_chunk_duration is not None else env_chunk
+    if chunk_dur is None:
+        chunk_dur = 120.0
+    return SortformerDiarizationAdapter(diar_model, max_chunk_duration=chunk_dur)
+
 
 
 
@@ -641,13 +670,14 @@ def _load_encoder_classifier():
 def run_diarization(
     pipeline: "Pipeline | FileDiarizationAdapter",
     wav_path: Path,
-    max_chunk_dur: float | None = None,
+    max_chunk_dur: float | str | None = None,
     progress_callback: Callable[[str, int], None] | None = None,
     diagnostics: dict | None = None,
 ) -> list[dict]:
     """
     Chạy diarization bằng cách dùng VAD để cắt audio thành các chunk <= max_chunk_dur,
     sau đó so sánh embedding để gán nhãn speaker globally (giúp tránh OOM).
+    Nếu max_chunk_dur là 'full' hoặc None, chạy toàn bộ audio không cắt chunk.
     """
     if isinstance(pipeline, FileDiarizationAdapter):
         if progress_callback is not None:
@@ -661,7 +691,12 @@ def run_diarization(
         return segments
 
     waveform, source_sample_rate = load_wav_tensor(wav_path)
-    if max_chunk_dur is None:
+    is_full = (
+        max_chunk_dur is None
+        or str(max_chunk_dur).strip().lower() in ("full", "none", "inf")
+        or max_chunk_dur == float("inf")
+    )
+    if is_full:
         if progress_callback is not None:
             progress_callback("start", 1)
         output = pipeline({"waveform": waveform, "sample_rate": source_sample_rate})
@@ -672,6 +707,8 @@ def run_diarization(
             progress_callback("advance", 1)
             progress_callback("close", 0)
         return segments
+    max_chunk_dur = float(max_chunk_dur)
+
     sample_rate = DIARIZATION_SAMPLE_RATE
     if source_sample_rate != sample_rate:
         target_length = max(1, round(waveform.shape[-1] * sample_rate / source_sample_rate))

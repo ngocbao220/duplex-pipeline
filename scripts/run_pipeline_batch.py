@@ -251,6 +251,8 @@ def run_batch():
                         help="Diarization backend (e.g. pyannote, sortformer, diarizen, auto).")
     parser.add_argument("--diarization-model", type=str, default=None,
                         help="Diarization model ID or alias (e.g. nvidia/diar_streaming_sortformer_4spk-v2.1).")
+    parser.add_argument("--diarize-chunk", type=str, default=None,
+                        help="Max chunk duration in seconds for diarization (e.g. 120.0, 600.0, or 'full').")
     parser.add_argument("--separation-chunk", "--separate-chunk", dest="separation_chunk", type=float, default=120.0,
                         help="Chunk duration in seconds for dialogue separation (default: 120.0).")
     parser.add_argument("--separation-model", type=Path, default=None,
@@ -360,6 +362,8 @@ def run_batch():
                     cmd.extend(["--diarization-backend", args.diarization_backend])
                 if args.diarization_model:
                     cmd.extend(["--diarization-model", args.diarization_model])
+                if args.diarize_chunk:
+                    cmd.extend(["--diarize-chunk", str(args.diarize_chunk)])
                 print(f"[{idx}/{len(wav_files)}] {gpu_tag}{wav.name} -> {sub_out.name}")
                 print("  Command:", " ".join(cmd))
         else:
@@ -393,10 +397,25 @@ def run_batch():
                         cmd.extend(["--diarization-backend", args.diarization_backend])
                     if args.diarization_model:
                         cmd.extend(["--diarization-model", args.diarization_model])
+                    if args.diarize_chunk:
+                        cmd.extend(["--diarize-chunk", str(args.diarize_chunk)])
                     print(f"[{idx}/{len(wav_files)}] {gpu_tag}{wav.name} -> {sub_out.name}")
                     timing = _timed_subprocess(cmd, wav, sub_out, worker_env)
                     if timing["exit_code"] != 0:
                         print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
+                    else:
+                        created = list(sub_out.glob("dialogue_*.wav"))
+                        if not created:
+                            manifest_path = sub_out / "manifest.json"
+                            reason = "no dialogue clips passed filter"
+                            if manifest_path.exists():
+                                try:
+                                    m_dict = json.loads(manifest_path.read_text(encoding="utf-8"))
+                                    if m_dict.get("skip_reason"):
+                                        reason = m_dict["skip_reason"]
+                                except Exception:
+                                    pass
+                            print(f"[WARNING] '{wav.name}' produced 0 dialogue clips (Reason: {reason})")
                     return timing
                 finally:
                     gpu_queue.put(target_gpu)
@@ -438,6 +457,22 @@ def run_batch():
             def _process_one_subdir(item):
                 idx, sdir = item
                 sub_out = output_dir / sdir.name
+                source_files = sorted(sdir.glob("dialogue_*.wav"))
+                if not source_files:
+                    print(f"[WARNING] Skipping '{sdir.name}': contains 0 dialogue files (filtered out in Phase 1).")
+                    return {
+                        "input": str(sdir.resolve()),
+                        "output": str(sub_out.resolve()),
+                        "started_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+                        "ended_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+                        "elapsed_seconds": 0.0,
+                        "audio_seconds": 0.0,
+                        "real_time_factor": None,
+                        "audio_seconds_per_wall_second": None,
+                        "exit_code": 0,
+                        "status": "skipped",
+                    }
+
                 target_gpu = gpu_queue.get()
                 try:
                     worker_env = dict(env)
@@ -459,7 +494,6 @@ def run_batch():
                     if args.separation_model:
                         cmd.extend(["--separation-model", str(args.separation_model.resolve())])
                     print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} -> {sub_out.name}")
-                    source_files = sorted(sdir.glob("dialogue_*.wav"))
                     source = source_files[0] if len(source_files) == 1 else sdir
                     timing = _timed_subprocess(cmd, source, sub_out, worker_env)
                     if len(source_files) > 1:

@@ -186,12 +186,23 @@ def prepare_diarization_chunks(
     Split long audio files prior to diarization using silence from VAD.
     Returns chunk metadata and optional temp directory for cleanup.
     """
+    if max_duration is None or str(max_duration).strip().lower() in ("full", "none", "inf"):
+        effective_max = float("inf")
+    else:
+        try:
+            effective_max = float(max_duration)
+            if effective_max <= 0:
+                effective_max = float("inf")
+        except (ValueError, TypeError):
+            effective_max = float("inf")
+
     waveform = audio_info["waveform"]
     sample_rate = audio_info["sample_rate"]
     total_duration, silence_intervals = _build_silence_intervals(
         waveform, sample_rate, min_silence, vad_model, silero_vad
     )
-    chunk_ranges = _build_chunk_ranges(total_duration, silence_intervals, max_duration)
+    chunk_ranges = _build_chunk_ranges(total_duration, silence_intervals, effective_max)
+
 
     epsilon = 1e-3
     normalized_audio = audio_info.get("audio_segment")

@@ -2470,12 +2470,23 @@ def prepare_diarization_chunks(
     Split long audio files prior to diarization using silence from VAD.
     Returns chunk metadata and optional temp directory for cleanup.
     """
+    if max_duration is None or str(max_duration).strip().lower() in ("full", "none", "inf"):
+        effective_max = float("inf")
+    else:
+        try:
+            effective_max = float(max_duration)
+            if effective_max <= 0:
+                effective_max = float("inf")
+        except (ValueError, TypeError):
+            effective_max = float("inf")
+
     waveform = audio_info["waveform"]
     sample_rate = audio_info["sample_rate"]
     total_duration, silence_intervals = _build_silence_intervals(
         waveform, sample_rate, min_silence
     )
-    chunk_ranges = _build_chunk_ranges(total_duration, silence_intervals, max_duration)
+    chunk_ranges = _build_chunk_ranges(total_duration, silence_intervals, effective_max)
+
 
     epsilon = 1e-3
     normalized_audio = audio_info.get("audio_segment")
@@ -2692,7 +2703,7 @@ def main_process(audio_path, save_path=None, audio_name=None,
         )
         step0_start = time.time()
         audio = standardization(audio_path)
-        max_chunk = float(getattr(args, "max_chunk_duration", 300.0))
+        max_chunk = getattr(args, "max_chunk_duration", 300.0)
         diar_chunks, temp_chunk_dir = prepare_diarization_chunks(audio_path, audio, max_duration=max_chunk)
         step0_end = time.time()
 
@@ -3141,9 +3152,9 @@ if __name__ == "__main__":
         "--max-chunk-duration",
         "--max_chunk_duration",
         dest="max_chunk_duration",
-        type=float,
-        default=300.0,
-        help="Maximum chunk duration in seconds for VAD dialogue splitting (default: 300.0 / 5 minutes)",
+        type=str,
+        default="300.0",
+        help="Maximum chunk duration in seconds for VAD dialogue splitting (default: 300.0 / 5 minutes, or 'full' for whole audio)",
     )
 
     # Sortformer diarization segment boundary adjustment (optional)

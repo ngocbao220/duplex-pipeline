@@ -9,8 +9,8 @@ from .diarization_backend import load_diarization_pipeline, run_diarization
 from core.orchestration.logging_style import get_logger
 
 
-def diarize(audio: Path, output_dir: Path, model: str, backend: str, device: str, chunk: float | None, progress):
-    model_instance = load_diarization_pipeline(model, device=device, backend=backend)
+def diarize(audio: Path, output_dir: Path, model: str, backend: str, device: str, chunk: float | str | None, progress):
+    model_instance = load_diarization_pipeline(model, device=device, backend=backend, max_chunk_duration=chunk)
     diagnostics: dict = {}
     try:
         segments = run_diarization(
@@ -20,3 +20,4 @@ def diarize(audio: Path, output_dir: Path, model: str, backend: str, device: str
         progress("close", 0)
     get_logger("duplexchat").info("speaker_linking=%s", diagnostics)
     return model_instance, segments
+

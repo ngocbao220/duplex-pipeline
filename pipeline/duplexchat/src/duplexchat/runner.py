@@ -188,7 +188,7 @@ def _separate_dialogues(waveform, sample_rate, dialogues, devices, num_steps, ch
 
 def run_single_audio(
     audio_path_str: str,
-    diarize_chunk: float | None = None,
+    diarize_chunk: float | str | None = None,
     separate_chunk: float = 120.0,
     separation_model: str | None = None,
     diarization_backend: str = "auto",
@@ -287,7 +287,7 @@ def run_single_audio(
 def split_valid_dialogues(
     audio_path_str: str,
     output_dir: str,
-    diarize_chunk: float | None = None,
+    diarize_chunk: float | str | None = None,
     diarization_backend: str = "auto",
     diarization_model: str = "pyannote/speaker-diarization-community-1",
     runtime_device: str = "auto",
@@ -352,8 +352,14 @@ def split_valid_dialogues(
 
     summary = dialogue_filter_summary(segments)
     dialogues = extract_valid_dialogues(segments)
-    logger.info("Found %d clips | Ignore: %d Imbalance | %d Short",
-                len(dialogues), summary.get("rejected_imbalanced", 0), summary.get("rejected_short", 0))
+    logger.info("+ Sample: %s", audio_path.name)
+    logger.info("+ Duration: %.2fs", audio_duration_sec or 0.0)
+    logger.info("+ Found %d clips", len(dialogues))
+    logger.info("+ Ignore:")
+    logger.info("++++ %d Imbalance (>80%% single speaker)", summary.get("rejected_imbalanced", 0))
+    logger.info("++++ %d Short (<10s)", summary.get("rejected_short", 0))
+    if summary.get("speakers", 0) < 2:
+        logger.info("++++ %d Monologue (<2 distinct speakers detected by diarization)", 1 if summary.get("speakers", 0) <= 1 else 0)
 
     waveform, sample_rate = load_wav_tensor(normalized)
     audio_duration_sec = float(waveform.shape[-1] / sample_rate)
@@ -363,6 +369,7 @@ def split_valid_dialogues(
     output_root.mkdir(parents=True, exist_ok=True)
     dialogue_info = []
     output_dialogue_idx = 1
+    lid_rejected_count = 0
 
     for index, dialogue in enumerate(dialogues):
         start = max(0, min(waveform.shape[-1], round(dialogue.start * sample_rate)))
@@ -376,7 +383,8 @@ def split_valid_dialogues(
         if lid_filter is not None:
             is_vi, vi_prob = lid_filter.is_vietnamese(crop, sample_rate, min_prob=min_vi_prob)
             if not is_vi:
-                logger.info("Dialogue candidate %d (%.2fs - %.2fs) skipped by Whisper LID (Vietnamese probability %.3f < %.3f)", index + 1, dialogue.start, dialogue.end, vi_prob, min_vi_prob)
+                lid_rejected_count += 1
+                logger.info("++++ 1 Skipped by Whisper LID (Vietnamese probability %.3f < %.3f)", vi_prob, min_vi_prob)
                 continue
 
         dialogue_filename = f"dialogue_{output_dialogue_idx}.wav"
@@ -395,23 +403,32 @@ def split_valid_dialogues(
         })
         output_dialogue_idx += 1
 
+    skip_reason = None
     if not dialogue_info:
-        logger.warning(
-            "===> [WARNING] Audio '%s' produced 0 valid dialogue clips! "
-            "(Segments: %d, Candidate runs: %d, Ignored Imbalance: %d, Ignored Short: %d)",
-            audio_path.name,
-            len(segments),
-            len(dialogues),
-            summary.get("rejected_imbalanced", 0),
-            summary.get("rejected_short", 0),
-        )
+        if summary.get("speakers", 0) < 2:
+            skip_reason = f"Diarization detected only {summary.get('speakers', 0)} speaker (Monologue - minimum 2 speakers required)"
+        elif len(dialogues) == 0:
+            reasons = []
+            if summary.get("rejected_imbalanced", 0) > 0:
+                reasons.append(f"{summary['rejected_imbalanced']} clips rejected due to speaker imbalance (>80%)")
+            if summary.get("rejected_short", 0) > 0:
+                reasons.append(f"{summary['rejected_short']} clips rejected for being too short (<10s)")
+            skip_reason = "; ".join(reasons) if reasons else "No two-speaker dialogue segments found"
+        elif lid_rejected_count > 0:
+            skip_reason = f"All {lid_rejected_count} candidate clips rejected by Whisper LID (language probability < {min_vi_prob})"
+        else:
+            skip_reason = "No candidate clips passed filtering criteria"
+
+        logger.warning("===> [SKIPPED] Audio '%s' produced 0 valid dialogue clips!", audio_path.name)
+        logger.warning("     Reason: %s", skip_reason)
     else:
-        logger.info("===> Collect %d dialogue clips from '%s', saved to '%s'", len(dialogue_info), audio_path.name, output_root)
+        logger.info("===> Collect %d dialogue from \"%s\", save to \"%s\"", len(dialogue_info), audio_path, output_root)
 
     manifest = {
         "source_audio": str(audio_path),
         "audio_duration_sec": audio_duration_sec,
         "dialogue_count": len(dialogue_info),
+        "skip_reason": skip_reason,
         "filter_music": filter_music,
         "music_model": music_model if filter_music else None,
         "filter_vietnamese": filter_vietnamese,
