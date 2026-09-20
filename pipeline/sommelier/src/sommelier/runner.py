@@ -42,10 +42,18 @@ def run(source: Path, output: Path, config: dict):
     }
     vendor = Path(__file__).resolve().parents[2] / "vendor" / "podcast_pipeline"
     env = os.environ.copy()
+    vendor_str = str(vendor.resolve())
+    sepreformer_str = str((vendor.parents[0] / "SepReformer").resolve())
+    existing_pp = env.get("PYTHONPATH", "")
+    paths = [vendor_str, sepreformer_str]
+    if existing_pp:
+        paths.append(existing_pp)
+    env["PYTHONPATH"] = os.pathsep.join(paths)
     if config.get("debug", False):
         env["SOMMELIER_LOG_LEVEL"] = "DEBUG"
     else:
         env["SOMMELIER_LOG_LEVEL"] = env.get("SOMMELIER_LOG_LEVEL", "INFO")
+
 
     sortformer_loc = os.environ.get("DUPLEX_MODEL_DIR", "local")
     sepreformer_loc = os.environ.get("SEPREFORMER", "local")

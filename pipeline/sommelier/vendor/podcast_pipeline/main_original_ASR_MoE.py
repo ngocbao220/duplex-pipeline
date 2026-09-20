@@ -1,7 +1,16 @@
 # Sommelier
 # Copyright (c) 2026-present NAVER Cloud Corp.
 # MIT
+import sys
+from pathlib import Path
+
+_VENDOR_DIR = str(Path(__file__).resolve().parent)
+if _VENDOR_DIR in sys.path:
+    sys.path.remove(_VENDOR_DIR)
+sys.path.insert(0, _VENDOR_DIR)
+
 import torch
+
 
 # Fix for PyTorch 2.6+ weights_only=True default breaking pyannote model loading
 # Patch lightning_fabric's _load function to use weights_only=False

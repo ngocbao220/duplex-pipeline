@@ -58,7 +58,9 @@ coverage.xml
 # Data & Model weights directories
 data/
 outputs/
-models/
+/models/
+!pipeline/sommelier/vendor/podcast_pipeline/models/
+
 *.pt
 *.pt2
 *.pth
