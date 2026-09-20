@@ -89,21 +89,44 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve Python interpreter (prioritize active conda env, pipeline .venv, or local .venv over base)
-if [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
-    PYTHON="${CONDA_PREFIX}/bin/python"
-elif [ "$PIPELINE" = "sommelier" ] && [ -x "$PROJECT_ROOT/pipeline/sommelier/.venv/bin/python" ]; then
+# Resolve Python interpreter (prioritize pipeline .venv, conda env, active env, or system python with hydra)
+if [ "$PIPELINE" = "sommelier" ] && [ -x "$PROJECT_ROOT/pipeline/sommelier/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/pipeline/sommelier/.venv/bin/python"
+elif [ "$PIPELINE" = "duplexchat" ] && [ -x "$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python"
 elif [ -x "$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python"
 elif [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/.venv/bin/python"
+elif [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
+    PYTHON="${CONDA_PREFIX}/bin/python"
+elif command -v conda >/dev/null 2>&1 && [ "$PIPELINE" = "duplexchat" ] && conda env list 2>/dev/null | grep -E "^duplexchat\s" >/dev/null 2>&1; then
+    CONDA_ENV_PATH=$(conda env list 2>/dev/null | grep -E "^duplexchat\s" | awk '{print $NF}')
+    PYTHON="${CONDA_ENV_PATH}/bin/python"
+elif command -v conda >/dev/null 2>&1 && [ "$PIPELINE" = "sommelier" ] && conda env list 2>/dev/null | grep -E "^sommelier\s" >/dev/null 2>&1; then
+    CONDA_ENV_PATH=$(conda env list 2>/dev/null | grep -E "^sommelier\s" | awk '{print $NF}')
+    PYTHON="${CONDA_ENV_PATH}/bin/python"
 elif command -v conda >/dev/null 2>&1 && conda env list 2>/dev/null | grep -E "^duplex-pipelines\s" >/dev/null 2>&1; then
     CONDA_ENV_PATH=$(conda env list 2>/dev/null | grep -E "^duplex-pipelines\s" | awk '{print $NF}')
     PYTHON="${CONDA_ENV_PATH}/bin/python"
+elif command -v python >/dev/null 2>&1 && python -c "import hydra" >/dev/null 2>&1; then
+    PYTHON="$(command -v python)"
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import hydra" >/dev/null 2>&1; then
+    PYTHON="$(command -v python3)"
+elif [ -x "/opt/conda/bin/python" ]; then
+    PYTHON="/opt/conda/bin/python"
+elif [ -n "${CONDA_PREFIX:-}" ]; then
+    PYTHON="${CONDA_PREFIX}/bin/python"
 else
     PYTHON="${PYTHON:-python3}"
 fi
+
+# Safeguard: Ensure hydra is available in the selected python interpreter
+if ! "$PYTHON" -c "import hydra" >/dev/null 2>&1; then
+    echo "[WARN] Interpreter '$PYTHON' is missing 'hydra'. Auto-installing hydra-core & omegaconf..."
+    "$PYTHON" -m pip install "hydra-core>=1.3.2" "omegaconf>=2.3.0" || true
+fi
+
 
 for SRC in "${SOURCES[@]}"; do
     echo "======================================================================"
