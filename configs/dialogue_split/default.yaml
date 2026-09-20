@@ -1,0 +1,22 @@
+# @package dialogue_split
+name: default
+
+diarization:
+  backend: sortformer
+  model: ${env.paths.sortformer}
+
+music_filter:
+  enabled: true
+  model: htdemucs
+
+lid:
+  enabled: true
+  code: vi
+  model: ${env.paths.whisper}
+  min_prob: 0.5
+
+dialogue:
+  min_duration: 2.0
+  max_duration: 120.0
+  max_speakers: 2
+  imbalance_ratio_threshold: 4.0

@@ -120,7 +120,7 @@ def step_convert(cfg: DictConfig, env: dict[str, str]) -> int:
 def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     """Phase 1: Preprocess, Diarize, Dialogue Filter, Music Removal & LID."""
     print(section("Dialogue Filtering"))
-    raw_dir = Path(cfg.data.raw_dir)
+    raw_dir = _resolve_raw_data_dir(cfg)
     dialogue_dir = Path(cfg.data.dialogue_dir)
 
     if not raw_dir.exists() and not cfg.dry_run:
@@ -139,22 +139,25 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         "--workers", str(workers),
     ]
 
+    split_cfg = cfg.get("dialogue_split") or cfg.get("pipeline", {})
+
     # Diarization
-    if cfg.get("diarization"):
-        if cfg.diarization.get("backend"):
-            cmd.extend(["--diarization-backend", str(cfg.diarization.backend)])
-        if cfg.diarization.get("model"):
-            cmd.extend(["--diarization-model", str(cfg.diarization.model)])
+    diar_cfg = split_cfg.get("diarization") or cfg.get("diarization", {})
+    if diar_cfg:
+        if diar_cfg.get("backend"):
+            cmd.extend(["--diarization-backend", str(diar_cfg.backend)])
+        if diar_cfg.get("model"):
+            cmd.extend(["--diarization-model", str(diar_cfg.model)])
 
     # Music filtering
-    music_filter_enabled = cfg.pipeline.get("music_filter", {}).get("enabled", True)
+    music_filter_enabled = split_cfg.get("music_filter", {}).get("enabled", True)
     if music_filter_enabled:
         cmd.append("--filter-music")
     else:
         cmd.append("--no-filter-music")
 
     # Language Identification (LID)
-    lid_cfg = cfg.pipeline.get("lid", {})
+    lid_cfg = split_cfg.get("lid", {})
     if lid_cfg.get("enabled", False) and lid_cfg.get("code"):
         cmd.extend(["--lid", str(lid_cfg.code)])
 
@@ -203,7 +206,7 @@ def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
 def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
     """Phase 2 (Sommelier): Overlap detection, SepReformer separation & track reconstruction."""
     print(section("Sommelier"))
-    input_dir = Path(cfg.data.raw_dir)
+    input_dir = _resolve_raw_data_dir(cfg)
     sommelier_out_dir = Path(cfg.data.sommelier_out_dir)
 
     if not input_dir.exists() and not cfg.dry_run:
@@ -278,23 +281,61 @@ def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
     return _run_cmd(retention_cmd, env, dry_run=cfg.dry_run)
 
 
+def _resolve_raw_data_dir(cfg: DictConfig) -> Path:
+    """Find the raw dataset directory matching data.source with Kaggle and local fallbacks."""
+    raw_path = Path(cfg.data.raw_dir)
+    if raw_path.exists():
+        return raw_path
+
+    source = str(cfg.data.source)
+    alt_sources = [source, source.replace("_", "-"), source.replace("-", "_")]
+    if "_" in source:
+        alt_sources.append(source.split("_")[0])
+
+    base_data = Path(str(cfg.env.paths.get("base_data", "data")))
+    candidates: list[Path] = []
+    for s in alt_sources:
+        candidates.append(base_data / s)
+    for s in alt_sources:
+        candidates.append(base_data / "raw" / s)
+    if raw_path.parent.exists():
+        for s in alt_sources:
+            candidates.append(raw_path.parent / s)
+
+    for cand in candidates:
+        if cand.exists() and cand.is_dir():
+            logger.info("Auto-resolved raw dataset directory: %s -> %s", raw_path, cand)
+            cfg.data.raw_dir = str(cand)
+            return cand
+
+    # Local fallback when unmounted on dev machine
+    if (str(base_data).startswith("/kaggle") or str(base_data).startswith("/storage-voice")) and not base_data.exists():
+        local_cand = ROOT_DIR / "data" / "raw" / source
+        if not local_cand.exists():
+            local_cand = ROOT_DIR / "data" / source
+        cfg.data.raw_dir = str(local_cand)
+        return local_cand
+
+    return raw_path
+
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(cfg: DictConfig) -> None:
-    # Auto-fallback: if configured base_data or base_models points to /storage-voice
-    # and /storage-voice is not mounted, safely redirect to local workspace data & models.
+    # Auto-fallback: if configured base_data or base_models points to unmounted cluster/kaggle dirs,
+    # safely redirect to local workspace data & models.
     if cfg.get("env") and cfg.env.get("paths"):
         base_data = str(cfg.env.paths.get("base_data", ""))
-        if base_data.startswith("/storage-voice") and not Path(base_data).exists():
+        if (base_data.startswith("/storage-voice") or base_data.startswith("/kaggle")) and not Path(base_data).exists():
             local_base_data = ROOT_DIR / "data"
             logger.warning(
-                "Storage directory %s not mounted. Falling back to local workspace data: %s",
+                "Data directory %s not mounted. Falling back to local workspace data: %s",
                 base_data,
                 local_base_data,
             )
             cfg.env.paths.base_data = str(local_base_data)
 
         base_models = str(cfg.env.paths.get("base_models", ""))
-        if base_models.startswith("/storage-voice") and not Path(base_models).exists():
+        if (base_models.startswith("/storage-voice") or base_models.startswith("/kaggle")) and not Path(base_models).exists():
             local_base_models = ROOT_DIR / "models"
             logger.warning(
                 "Models directory %s not mounted. Falling back to local workspace models: %s",
@@ -302,6 +343,9 @@ def main(cfg: DictConfig) -> None:
                 local_base_models,
             )
             cfg.env.paths.base_models = str(local_base_models)
+
+    # Resolve dataset paths for current execution
+    _resolve_raw_data_dir(cfg)
 
     step = str(cfg.step).lower()
     pipeline_name = str(cfg.pipeline.name).lower()

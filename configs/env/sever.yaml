@@ -1,0 +1,16 @@
+# @package env
+name: sever
+offline: true
+
+paths:
+  base_models: /storage-voice/voice/vdt/baottn/duplex-model-dir
+  base_data: /storage-voice/voice/vdt/baottn/duplex-data
+  base_output: ${env.paths.base_data}/processed
+  dialoguesidon: ${env.paths.base_models}/DialogueSidon
+  dnsmos: ${env.paths.base_models}/dnsmos
+  speechbrain: ${env.paths.base_models}/spkrec-ecapa-voxceleb
+  nisqa: ${env.paths.base_models}/nisqa.tar
+  squim: ${env.paths.base_models}/squim_objective_dns2020.pth
+  whisper: /raid/voice/chauhn3/whisper/whisper-large-v3
+  sortformer: ${env.paths.base_models}/diar_streaming_sortformer_4spk-v2.1
+  sepreformer: ${env.paths.base_models}/epoch.0180.pth

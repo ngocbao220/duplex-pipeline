@@ -129,8 +129,8 @@ def _apply_sortformer_segment_padding_from_args(
 
     return df
 audio_count = 0
-# Limit diarization chunks to under 3 minutes, preferring VAD-detected silences as cut points.
-MAX_DIA_CHUNK_DURATION = 2 * 60  # 3 minutes
+# Limit diarization chunks to under 5 minutes, preferring VAD-detected silences as cut points.
+MAX_DIA_CHUNK_DURATION = 5 * 60  # 5 minutes
 MIN_SPLIT_SILENCE = 0.3  # seconds of silence required for splitting (more sensitive)
 MIN_EMBED_DURATION = 0.5  # seconds; skip embedding if audio is shorter
 QWEN_3_OMNI_PORT = "11500"
@@ -2692,7 +2692,8 @@ def main_process(audio_path, save_path=None, audio_name=None,
         )
         step0_start = time.time()
         audio = standardization(audio_path)
-        diar_chunks, temp_chunk_dir = prepare_diarization_chunks(audio_path, audio)
+        max_chunk = float(getattr(args, "max_chunk_duration", 300.0))
+        diar_chunks, temp_chunk_dir = prepare_diarization_chunks(audio_path, audio, max_duration=max_chunk)
         step0_end = time.time()
 
         # Calculate total audio duration
@@ -3134,6 +3135,15 @@ if __name__ == "__main__":
         type=float,
         default=1.0,
         help="Minimum overlap duration in seconds to trigger SepReformer separation",
+    )
+
+    parser.add_argument(
+        "--max-chunk-duration",
+        "--max_chunk_duration",
+        dest="max_chunk_duration",
+        type=float,
+        default=300.0,
+        help="Maximum chunk duration in seconds for VAD dialogue splitting (default: 300.0 / 5 minutes)",
     )
 
     # Sortformer diarization segment boundary adjustment (optional)

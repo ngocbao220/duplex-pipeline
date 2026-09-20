@@ -1,0 +1,18 @@
+# @package env
+name: dev
+offline: false
+
+paths:
+  base_models: /kaggle/input/models/ngocbaotrinhtuan
+  base_data: /kaggle/input/datasets/ngocbaotrinhtuan
+  base_output: outputs/processed
+  dialoguesidon: sarulab-speech/DialogueSidon
+  dnsmos: /kaggle/input/models/ngocbaotrinhtuan/dnsmos/pytorch/dnsmos/1
+  speechbrain: speechbrain/spkrec-ecapa-voxceleb
+  nisqa: ${env.paths.base_models}/nisqa.tar
+  squim: ${env.paths.base_models}/squim_objective_dns2020.pth
+  whisper: openai/whisper-small
+  sortformer: nvidia/diar_streaming_sortformer_4spk-v2.1
+  sepreformer: /kaggle/input/models/ngocbaotrinhtuan/sepreformer-base-wsj0/pytorch/default/1/sepreformer_base_wsj0.pth
+  youtube: /kaggle/input/datasets/ngocbaotrinhtuan/youtube
+  podcast_index: /kaggle/input/datasets/ngocbaotrinhtuan/podcast-index

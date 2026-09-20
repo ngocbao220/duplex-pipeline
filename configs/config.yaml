@@ -1,6 +1,7 @@
 # @package _global_
 defaults:
   - env: sever
+  - dialogue_split: default
   - pipeline: duplexchat
   - diarization: sortformer
   - separation: dialoguesidon
@@ -18,9 +19,9 @@ data:
   source: youtube       # Sub-corpus name (e.g. youtube, podcast_index)
   crawl_dir: ${env.paths.base_data}/crawl
   raw_dir: ${env.paths.base_data}/raw/${data.source}
-  dialogue_dir: ${env.paths.base_data}/processed/dialogue/${data.source}
-  duplex_out_dir: ${env.paths.base_data}/processed/duplexchat/${data.source}
-  sommelier_out_dir: ${env.paths.base_data}/processed/sommelier/${data.source}
+  dialogue_dir: ${env.paths.base_output}/dialogue/${data.source}
+  duplex_out_dir: ${env.paths.base_output}/duplexchat/${data.source}
+  sommelier_out_dir: ${env.paths.base_output}/sommelier/${data.source}
   pattern: "*.wav"
 
 # Shared Runtime Settings
@@ -33,4 +34,3 @@ optimization:
   workers: 2               # Parallel workers on GPU (A100 40GB supports 2-4 concurrent tasks)
   convert_workers: 8       # Parallel ffmpeg workers on CPU
   threads_per_worker: 1    # Enforce strictly 1 CPU thread per worker process (CPU <= 100%)
-

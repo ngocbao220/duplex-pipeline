@@ -4,6 +4,7 @@ name: sommelier
 sample_rate: 16000
 overlap_threshold: 1.0
 speaker_link_threshold: 0.75
+max_chunk_duration: 300.0   # <= 5 minutes per Silero VAD accumulated dialogue chunk
 demucs: false
 expected_speakers: 2
 checkpoint: ${env.paths.sepreformer}

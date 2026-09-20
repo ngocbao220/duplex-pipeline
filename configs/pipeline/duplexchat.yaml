@@ -1,19 +1,11 @@
 # @package pipeline
 name: duplexchat
 
-# Phase 1: Dialogue Extraction & Filtering
-music_filter:
-  enabled: true
-  model: htdemucs
+sample_rate: 24000
 
-lid:
-  enabled: true
-  code: vi
-  model: ${env.paths.whisper}
-  min_prob: 0.5
-
-# Phase 2: Separation
+# Phase 2: Separation by DialogueSidon
 separation:
+  backend: dialoguesidon
   chunk: 60.0
   num_steps: 30
   model: ${env.paths.dialoguesidon}

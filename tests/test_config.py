@@ -123,3 +123,46 @@ cholimex:
     assert config.separation_num_steps == 12
     assert config.cholimex_overlap_padding == 0.15
 
+
+def test_dialogue_split_is_decoupled_from_duplexchat():
+    root = Path(__file__).resolve().parents[1]
+    import yaml
+    
+    with open(root / "configs" / "pipeline" / "duplexchat.yaml", encoding="utf-8") as f:
+        duplex_cfg = yaml.safe_load(f)
+    assert "music_filter" not in duplex_cfg
+    assert "lid" not in duplex_cfg
+    assert "separation" in duplex_cfg
+    assert duplex_cfg["separation"]["backend"] == "dialoguesidon"
+
+    with open(root / "configs" / "dialogue_split" / "default.yaml", encoding="utf-8") as f:
+        split_cfg = yaml.safe_load(f)
+    assert "music_filter" in split_cfg
+    assert "lid" in split_cfg
+    assert "dialogue" in split_cfg
+
+
+def test_kaggle_dev_config_paths():
+    root = Path(__file__).resolve().parents[1]
+    import yaml
+    
+    with open(root / "configs" / "env" / "dev.yaml", encoding="utf-8") as f:
+        dev_cfg = yaml.safe_load(f)
+    paths = dev_cfg["paths"]
+    assert paths["sepreformer"] == "/kaggle/input/models/ngocbaotrinhtuan/sepreformer-base-wsj0/pytorch/default/1/sepreformer_base_wsj0.pth"
+    assert paths["dnsmos"] == "/kaggle/input/models/ngocbaotrinhtuan/dnsmos/pytorch/dnsmos/1"
+    assert paths["youtube"] == "/kaggle/input/datasets/ngocbaotrinhtuan/youtube"
+    assert paths["podcast_index"] == "/kaggle/input/datasets/ngocbaotrinhtuan/podcast-index"
+    assert paths["base_output"] == "outputs/processed"
+    assert dev_cfg["offline"] is False
+
+
+def test_sommelier_pipeline_declares_max_chunk_duration():
+    root = Path(__file__).resolve().parents[1]
+    import yaml
+    
+    with open(root / "configs" / "pipeline" / "sommelier.yaml", encoding="utf-8") as f:
+        somm_cfg = yaml.safe_load(f)
+    assert somm_cfg.get("max_chunk_duration") == 300.0
+
+

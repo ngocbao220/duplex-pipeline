@@ -64,9 +64,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve Python interpreter (prioritize duplex-pipelines conda env or local .venv over base)
+# Resolve Python interpreter (prioritize pipeline .venv, conda env, or local .venv over base)
 if [ -n "${CONDA_PREFIX:-}" ] && [ "${CONDA_DEFAULT_ENV:-}" != "base" ]; then
     PYTHON="${CONDA_PREFIX}/bin/python"
+elif [ -x "$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_ROOT/pipeline/duplexchat/.venv/bin/python"
 elif [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON="$PROJECT_ROOT/.venv/bin/python"
 elif command -v conda >/dev/null 2>&1 && conda env list 2>/dev/null | grep -E "^duplex-pipelines\s" >/dev/null 2>&1; then
