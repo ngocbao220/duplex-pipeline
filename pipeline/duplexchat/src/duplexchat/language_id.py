@@ -55,18 +55,12 @@ def load_whisper_lid_model(
         return WhisperLIDFilter(model=model, processor=processor, device=resolved_device)
 
     except Exception as exc:
-        LOGGER.warning("Could not load Transformers Whisper model '%s': %s. Trying openai-whisper package...", local_target, exc)
-        try:
-            import whisper
-
-            target_str = str(local_target)
-            model = whisper.load_model(target_str, device=resolved_device)
-            return OpenAIWhisperLIDFilter(model=model, device=resolved_device)
-        except Exception as exc2:
-            raise RuntimeError(
-                f"Failed to load Whisper LID model from '{local_target}'. "
-                f"Ensure whisper model weights are present locally. Error: {exc2}"
-            ) from exc2
+        raise RuntimeError(
+            f"Failed to load Transformers Whisper LID model from '{local_target}'. "
+            "Ensure the local Transformers model files are present and the "
+            "DuplexChat runtime dependencies are installed. "
+            f"Original error: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 class NoOpLIDFilter:
@@ -118,30 +112,3 @@ class WhisperLIDFilter:
         except Exception as exc:
             LOGGER.warning("Whisper LID detection failed (%s); allowing segment by default", exc)
             return True, 1.0
-
-
-class OpenAIWhisperLIDFilter:
-    """Filter dialogue audio using OpenAI whisper package."""
-
-    def __init__(self, model, device: str) -> None:
-        self.model = model
-        self.device = torch.device(device)
-
-    def is_vietnamese(self, waveform: torch.Tensor, sample_rate: int, min_prob: float = 0.5) -> tuple[bool, float]:
-        import whisper
-        import torchaudio.functional as F_audio
-
-        if waveform.ndim > 1:
-            waveform = waveform.mean(dim=0)
-        if sample_rate != TARGET_SAMPLE_RATE:
-            waveform = F_audio.resample(waveform.unsqueeze(0), sample_rate, TARGET_SAMPLE_RATE).squeeze(0)
-
-        audio_np = waveform.detach().cpu().numpy()
-        audio_padded = whisper.pad_or_trim(audio_np)
-        mel = whisper.log_mel_spectrogram(audio_padded).to(self.device)
-
-        with torch.inference_mode():
-            _, probs = self.model.detect_language(mel)
-
-        vi_prob = float(probs.get("vi", 0.0))
-        return (vi_prob >= min_prob), vi_prob

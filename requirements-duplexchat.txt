@@ -17,20 +17,21 @@ demucs==4.0.1
 pyannote.audio==3.3.2
 speechbrain==1.0.3
 diffusers==0.30.0
-huggingface-hub==0.33.4
+huggingface-hub>=0.34.0,<1.0
 wrapt
 
-# Sortformer / NeMo. NeMo 2.3 is the runtime used by DuplexChat. Pinning a
-# Python-3.12-capable ONNX release prevents pip from backtracking to ONNX 1.10
-# source distributions, which cannot build their metadata on this interpreter.
+# Sortformer / NeMo and Transformers Whisper LID. NeMo 2.7.3 requires
+# protobuf 5.29.x, which includes google.protobuf.runtime_version required by
+# current Transformers Whisper. ONNX 1.22 has a Python 3.12 wheel.
 Cython==3.1.2
 packaging==24.2
 omegaconf
 hydra-core
 pytorch-lightning
-transformers>=4.51.0,<=4.53.3
-nemo_toolkit[asr]==2.3.0
-onnx==1.16.2
+transformers~=4.57.0
+nemo_toolkit[asr]==2.7.3
+protobuf~=5.29.5
+onnx==1.22.0
 onnxruntime==1.22.1
 
 numpy

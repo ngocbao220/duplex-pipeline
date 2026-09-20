@@ -9,28 +9,13 @@ description = "Three isolated two-speaker separation pipelines"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "tqdm",
-    "pyannote.audio==3.3.2",
-    "torch>=2.7.0,<=2.8.0",
-    "torchaudio>=2.7.0,<=2.8.0",
-    "torchcodec>=0.6.0,<=0.7.0",
-    "soundfile",
-    "diffusers<=0.30.0",
-    "huggingface-hub==0.33.4",
-    "wrapt",
-    "onnxruntime",
-    "speechbrain==1.0.3",
-    "librosa",
-    "pydub",
-    "demucs>=4.0.1",
-    "Cython",
-    "nemo_toolkit[asr]>=2.3.0,<=3.0.0",
-    "packaging",
-    "omegaconf",
+    # Shared orchestration and benchmark primitives only. Each pipeline owns
+    # its incompatible Torch/NeMo runtime in pipeline/*/pyproject.toml.
     "hydra-core",
-    "pytorch-lightning",
-    "transformers>=4.51.0,<=4.53.3",
     "numpy",
+    "omegaconf",
+    "soundfile",
+    "torch>=2.7.0,<=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -50,11 +35,11 @@ diarization-pyannote = [
 diarization-sortformer = [
     "Cython==3.1.2",
     "packaging==24.2",
-    "nemo_toolkit[asr]==2.3.0",
+    "nemo_toolkit[asr]==2.7.3",
 ]
 separation-dialoguesidon = [
     "diffusers==0.30.0",
-    "huggingface-hub==0.33.4",
+    "huggingface-hub>=0.34.0,<1.0",
 ]
 separation-sepformer = [
     "speechbrain==1.0.3",

@@ -196,9 +196,12 @@ def test_core_runtime_dependencies_are_pinned():
     assert "torch==2.8.0" in duplex_deps
     assert "torchaudio==2.8.0" in duplex_deps
     assert "torchcodec==0.7.0" in duplex_deps
-    assert "nemo_toolkit[asr]==2.3.0" in duplex_deps
-    assert "onnx==1.16.2" in duplex_deps
+    assert "nemo_toolkit[asr]==2.7.3" in duplex_deps
+    assert "protobuf~=5.29.5" in duplex_deps
+    assert "onnx==1.22.0" in duplex_deps
     assert "onnxruntime==1.22.1" in duplex_deps
+    assert "transformers~=4.57.0" in duplex_deps
+    assert "huggingface-hub>=0.34.0,<1.0" in duplex_deps
     assert "speechbrain==1.0.3" in duplex_deps
     assert "pyannote.audio==3.3.2" in duplex_deps
     assert duplex_cfg.get("tool", {}).get("uv", {}).get("extra-build-dependencies", {}).get("youtokentome") == ["Cython"]
@@ -218,9 +221,12 @@ def test_core_runtime_dependencies_are_pinned():
     # requirements-duplexchat.txt core pins
     duplex_req = (root / "requirements-duplexchat.txt").read_text()
     assert "torch==2.8.0" in duplex_req
-    assert "nemo_toolkit[asr]==2.3.0" in duplex_req
-    assert "onnx==1.16.2" in duplex_req
+    assert "nemo_toolkit[asr]==2.7.3" in duplex_req
+    assert "protobuf~=5.29.5" in duplex_req
+    assert "onnx==1.22.0" in duplex_req
     assert "onnxruntime==1.22.1" in duplex_req
+    assert "transformers~=4.57.0" in duplex_req
+    assert "huggingface-hub>=0.34.0,<1.0" in duplex_req
 
     # requirements-sommelier.txt core pins
     somm_req = (root / "requirements-sommelier.txt").read_text()
