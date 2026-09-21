@@ -50,7 +50,28 @@ class DemucsMusicFilter:
 
         self.device = torch.device(resolved_device)
         self.apply_model = apply_model
-        self.model = get_model(model_name)
+
+        # Support offline model path via DEMUCS_MODEL_PATH or local model_name
+        import os
+        from pathlib import Path
+        model_path = os.environ.get("DEMUCS_MODEL_PATH")
+        if not model_path and model_name and Path(model_name).exists():
+            model_path = model_name
+
+        if model_path and Path(model_path).exists():
+            p = Path(model_path).resolve()
+            if p.is_dir():
+                try:
+                    self.model = get_model(name="htdemucs", repo=p)
+                except Exception:
+                    self.model = get_model(model_name)
+            elif p.is_file():
+                self.model = get_model(str(p))
+            else:
+                self.model = get_model(model_name)
+        else:
+            self.model = get_model(model_name)
+
         self.model.to(self.device)
         self.model.eval()
 

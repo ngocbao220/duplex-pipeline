@@ -14,3 +14,4 @@ paths:
   whisper: /raid/voice/chauhn3/whisper/whisper-large-v3
   sortformer: ${env.paths.base_models}/diar_streaming_sortformer_4spk-v2.1
   sepreformer: ${env.paths.base_models}/epoch.0180.pth
+  demucs: ${env.paths.base_models}/htdemucs

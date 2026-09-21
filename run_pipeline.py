@@ -83,6 +83,8 @@ def _setup_runtime_environment(cfg: DictConfig) -> dict[str, str]:
         env["WHISPER_MODEL_PATH"] = str(cfg.env.paths.whisper)
     if cfg.env.paths.get("sepreformer"):
         env["SEPREFORMER"] = str(cfg.env.paths.sepreformer)
+    if cfg.env.paths.get("demucs"):
+        env["DEMUCS_MODEL_PATH"] = str(cfg.env.paths.demucs)
 
     return env
 
