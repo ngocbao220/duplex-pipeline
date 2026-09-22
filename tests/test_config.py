@@ -157,6 +157,20 @@ def test_kaggle_dev_config_paths():
     assert dev_cfg["offline"] is False
 
 
+def test_server_config_declares_explicit_sommelier_local_models():
+    root = Path(__file__).resolve().parents[1]
+    import yaml
+
+    with open(root / "configs" / "env" / "sever.yaml", encoding="utf-8") as f:
+        server_cfg = yaml.safe_load(f)
+    paths = server_cfg["paths"]
+
+    assert paths["silero_vad"] == "${env.paths.base_models}/silero-vad"
+    assert paths["speechbrain"] == "${env.paths.base_models}/spker"
+    assert paths["sortformer"] == "${env.paths.base_models}/diar_streaming_sortformer_4spk-v2.1"
+    assert paths["sepreformer"] == "${env.paths.base_models}/epoch.0180.pth"
+
+
 def test_sommelier_pipeline_declares_max_chunk_duration():
     root = Path(__file__).resolve().parents[1]
     import yaml

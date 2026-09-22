@@ -15,12 +15,63 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 from core.orchestration.logging_style import get_logger, section  # noqa: E402
+from core.model_utils import is_offline_mode  # noqa: E402
+
+
+def validate_offline_models() -> None:
+    """Reject incomplete Sommelier model paths before starting the vendor process."""
+    if not is_offline_mode():
+        return
+
+    checks = (
+        ("Silero VAD", "SILERO_VAD_MODEL_PATH", _is_silero_vad_bundle),
+        ("Sortformer", "SORTFORMER_MODEL_PATH", _is_sortformer_bundle),
+        ("SpeechBrain ECAPA", "SPEECHBRAIN_MODEL_PATH", _is_speechbrain_bundle),
+        ("SepReformer", "SEPREFORMER", _is_sepreformer_checkpoint),
+    )
+    logger = get_logger("sommelier")
+    missing = []
+    for name, env_var, validator in checks:
+        configured_path = os.environ.get(env_var, "")
+        path = Path(configured_path).expanduser()
+        if not configured_path or not validator(path):
+            logger.error("No found model %s on path: %s", name, configured_path)
+            missing.append(name)
+    if missing:
+        raise FileNotFoundError(
+            "Sommelier local model preflight failed: " + ", ".join(missing) + "."
+        )
+
+
+def _is_silero_vad_bundle(path: Path) -> bool:
+    if path.is_file():
+        return path.suffix.lower() in {".jit", ".pt"}
+    return any((path / candidate).is_file() for candidate in (
+        "silero_vad.jit", "silero_vad.pt", "files/silero_vad.jit", "hubconf.py",
+    ))
+
+
+def _is_sortformer_bundle(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() == ".nemo" or (
+        path.is_dir() and any(path.glob("*.nemo"))
+    )
+
+
+def _is_speechbrain_bundle(path: Path) -> bool:
+    return path.is_dir() and all((path / name).is_file() for name in (
+        "hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt",
+    ))
+
+
+def _is_sepreformer_checkpoint(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in {".pt", ".pth"}
 
 
 def run(source: Path, output: Path, config: dict):
     import re
     logger = get_logger("sommelier")
     token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN") or "hf_offline_local_token"
+    validate_offline_models()
     _stage_sepreformer_checkpoint()
     native = output / f"native_{source.stem}"
     input_dir = native / "input"
@@ -155,10 +206,10 @@ def _stage_sepreformer_checkpoint() -> None:
     """Expose the shared checkpoint through original Sommelier's fixed lookup path."""
     configured = os.environ.get("SEPREFORMER") or os.environ.get("VILIER_SEPREFORMER_CHECKPOINT", "")
     if not configured:
-        raise RuntimeError("Set SEPREFORMER to a trusted SepReformer .pt/.pth file")
+        raise FileNotFoundError("No found model SepReformer on path: ")
     checkpoint = Path(configured).expanduser().resolve()
     if not checkpoint.is_file() or checkpoint.suffix.lower() not in {".pt", ".pth"}:
-        raise RuntimeError(f"Invalid SEPREFORMER: {checkpoint}")
+        raise FileNotFoundError(f"No found model SepReformer on path: {configured}")
     weights_dir = Path(__file__).resolve().parents[2] / "vendor" / "SepReformer" / "models" / "SepReformer_Base_WSJ0" / "log" / "pretrain_weights"
     weights_dir.mkdir(parents=True, exist_ok=True)
     link = weights_dir / checkpoint.name
@@ -220,5 +271,4 @@ def _reconstruct_tracks(source: Path, manifest_path: Path, output: Path) -> Path
 
     sf.write(stereo, out_samples, out_rate, subtype="PCM_16")
     return stereo
-
 

@@ -3229,7 +3229,7 @@ if __name__ == "__main__":
 
     # Speaker Diarization (Optional in Sommelier because Sommelier uses Sortformer)
     logger.debug(" * Checking Speaker Diarization Model")
-    from core.model_utils import enforce_offline_mode, resolve_local_model_path, is_offline_mode
+    from core.model_utils import assert_local_model_exists, enforce_offline_mode, resolve_local_model_path, is_offline_mode
     enforce_offline_mode()
     dia_pipeline = None
     try:
@@ -3375,6 +3375,7 @@ if __name__ == "__main__":
 
         # Fallback to local SpeechBrain ECAPA-TDNN if pyannote embedding is not available
         if embedding_model is None:
+            sb_path = None
             try:
                 from speechbrain.inference.speaker import EncoderClassifier
                 sb_path, is_sb_local = resolve_local_model_path(
@@ -3382,6 +3383,12 @@ if __name__ == "__main__":
                     env_var="SPEECHBRAIN_MODEL_PATH",
                     default_subpath="spkrec-ecapa-voxceleb"
                 )
+                if is_offline_mode():
+                    assert_local_model_exists(
+                        sb_path,
+                        required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
+                        model_name_hint="SpeechBrain ECAPA",
+                    )
                 sb_classifier = EncoderClassifier.from_hparams(
                     source=str(sb_path),
                     run_opts={"device": str(device)},
@@ -3399,6 +3406,9 @@ if __name__ == "__main__":
                 embedding_model = SpeechBrainEmbeddingWrapper(sb_classifier)
                 logger.info(" * Loaded local SpeechBrain ECAPA-TDNN as embedding model for SepReformer")
             except Exception as sb_err:
+                if is_offline_mode():
+                    logger.error("No found model SpeechBrain ECAPA on path: %s (%s)", sb_path or os.environ.get("SPEECHBRAIN_MODEL_PATH", ""), sb_err)
+                    raise
                 logger.warning(f" * Could not load SpeechBrain fallback embedding model: {sb_err}")
                 embedding_model = None
 

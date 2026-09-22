@@ -70,6 +70,17 @@ def test_resolve_local_model_path_base_dir(tmp_path, monkeypatch):
     assert path == target_sub.resolve()
 
 
+def test_offline_resolution_fails_with_the_configured_model_path(monkeypatch, tmp_path):
+    missing_path = tmp_path / "missing-silero"
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("SILERO_VAD_MODEL_PATH", str(missing_path))
+
+    with pytest.raises(FileNotFoundError, match=rf"No found model snakers4/silero-vad on path: {missing_path}"):
+        resolve_local_model_path(
+            "snakers4/silero-vad", env_var="SILERO_VAD_MODEL_PATH", default_subpath="silero-vad"
+        )
+
+
 def test_assert_local_model_exists_missing_dir():
     with pytest.raises(FileNotFoundError, match="Local model path '.*non_existent.*' does not exist"):
         assert_local_model_exists("/non_existent_dir_12345", model_name_hint="TestModel")
@@ -151,3 +162,85 @@ def test_load_local_silero_vad_resolution(tmp_path, monkeypatch):
     resolved, is_dir = resolve_local_model_path("snakers4/silero-vad", env_var="SILERO_VAD_MODEL_PATH")
     assert resolved == onnx_file.resolve()
     assert is_dir is True
+
+
+def test_local_silero_vad_fallback_converts_numpy_audio_to_tensor():
+    """TorchScript Silero models reject the NumPy chunks emitted by librosa."""
+    import numpy as np
+    import torch
+
+    from core.model_utils import _get_speech_timestamps_fallback
+
+    class TensorOnlyVAD(torch.nn.Module):
+        def forward(self, audio, sample_rate):
+            assert isinstance(audio, torch.Tensor)
+            assert audio.dtype == torch.float32
+            assert sample_rate == 16_000
+            return torch.tensor(0.9)
+
+    timestamps = _get_speech_timestamps_fallback(
+        np.zeros(1_024, dtype=np.float32), TensorOnlyVAD(), sampling_rate=16_000
+    )
+
+    assert timestamps == [{"start": 0, "end": 1_024}]
+
+
+def test_offline_silero_missing_local_model_never_calls_torch_hub(monkeypatch, tmp_path):
+    import torch
+    from core.model_utils import load_local_silero_vad
+
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("SILERO_VAD_MODEL_PATH", str(tmp_path / "missing-silero"))
+    monkeypatch.setattr(torch.hub, "load", lambda *_args, **_kwargs: pytest.fail("Torch Hub must not run offline"))
+
+    with pytest.raises(FileNotFoundError, match="No found model snakers4/silero-vad"):
+        load_local_silero_vad()
+
+
+def test_sommelier_offline_preflight_reports_every_missing_local_model(monkeypatch, tmp_path, capsys):
+    """Server mode must stop before the vendor subprocess can try a remote loader."""
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "pipeline" / "sommelier" / "src"))
+    from sommelier.runner import validate_offline_models
+
+    monkeypatch.setenv("MODE", "sever")
+    missing = tmp_path / "models"
+    monkeypatch.setenv("SILERO_VAD_MODEL_PATH", str(missing / "silero-vad"))
+    monkeypatch.setenv("SORTFORMER_MODEL_PATH", str(missing / "sortformer"))
+    monkeypatch.setenv("SPEECHBRAIN_MODEL_PATH", str(missing / "spker"))
+    monkeypatch.setenv("SEPREFORMER", str(missing / "epoch.0180.pth"))
+
+    with pytest.raises(FileNotFoundError, match="Sommelier local model preflight failed"):
+        validate_offline_models()
+
+    messages = capsys.readouterr().out
+    for name, path in (
+        ("Silero VAD", missing / "silero-vad"),
+        ("Sortformer", missing / "sortformer"),
+        ("SpeechBrain ECAPA", missing / "spker"),
+        ("SepReformer", missing / "epoch.0180.pth"),
+    ):
+        assert f"No found model {name} on path: {path}" in messages
+
+
+def test_sommelier_run_stops_before_vendor_subprocess_when_offline_models_are_missing(monkeypatch, tmp_path):
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "pipeline" / "sommelier" / "src"))
+    from sommelier import runner
+
+    monkeypatch.setenv("MODE", "sever")
+    for env_var in ("SILERO_VAD_MODEL_PATH", "SORTFORMER_MODEL_PATH", "SPEECHBRAIN_MODEL_PATH", "SEPREFORMER"):
+        monkeypatch.setenv(env_var, str(tmp_path / env_var.lower()))
+    monkeypatch.setattr(runner.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("vendor must not start"))
+
+    source = tmp_path / "input.wav"
+    source.touch()
+    output = tmp_path / "output"
+    with pytest.raises(FileNotFoundError, match="Sommelier local model preflight failed"):
+        runner.run(source, output, {})
+
+    assert not output.exists()

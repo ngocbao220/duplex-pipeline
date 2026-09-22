@@ -32,18 +32,23 @@ def _setup_runtime_environment(cfg: DictConfig) -> dict[str, str]:
     is_offline = bool(cfg.env.get("offline", False))
     if is_offline:
         logger.info("[MODE: SEVER] Offline mode — using local disk models only.")
+        env["MODE"] = "sever"
         env["HF_HUB_OFFLINE"] = "1"
         env["TRANSFORMERS_OFFLINE"] = "1"
         env["HF_DATASETS_OFFLINE"] = "1"
     else:
         logger.info("[MODE: DEV] Dev mode — remote model downloads from HuggingFace permitted.")
+        env.pop("MODE", None)
         env.pop("HF_HUB_OFFLINE", None)
         env.pop("TRANSFORMERS_OFFLINE", None)
         env.pop("HF_DATASETS_OFFLINE", None)
 
     # GPU target
     gpu_id = str(cfg.gpu).strip()
-    env["CUDA_VISIBLE_DEVICES"] = gpu_id
+    if gpu_id.lower() in ("auto", "all"):
+        env.pop("CUDA_VISIBLE_DEVICES", None)
+    else:
+        env["CUDA_VISIBLE_DEVICES"] = gpu_id
 
     # Pipeline Run ID for timing aggregation
     if "PIPELINE_RUN_ID" not in env:
@@ -75,6 +80,8 @@ def _setup_runtime_environment(cfg: DictConfig) -> dict[str, str]:
     # Specific model paths
     if cfg.env.paths.get("sortformer"):
         env["SORTFORMER_MODEL_PATH"] = str(cfg.env.paths.sortformer)
+    if cfg.env.paths.get("silero_vad"):
+        env["SILERO_VAD_MODEL_PATH"] = str(cfg.env.paths.silero_vad)
     if cfg.env.paths.get("dialoguesidon"):
         env["DIALOGUESIDON_MODEL_PATH"] = str(cfg.env.paths.dialoguesidon)
     if cfg.env.paths.get("speechbrain"):

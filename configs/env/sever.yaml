@@ -8,7 +8,9 @@ paths:
   base_output: ${env.paths.base_data}/processed
   dialoguesidon: ${env.paths.base_models}/DialogueSidon
   dnsmos: ${env.paths.base_models}/dnsmos
-  speechbrain: ${env.paths.base_models}/spkrec-ecapa-voxceleb
+  # Sommelier's local ECAPA bundle must contain hyperparams.yaml at this root.
+  speechbrain: ${env.paths.base_models}/spker
+  silero_vad: ${env.paths.base_models}/silero-vad
   nisqa: ${env.paths.base_models}/nisqa.tar
   squim: ${env.paths.base_models}/squim_objective_dns2020.pth
   whisper: /raid/voice/chauhn3/whisper/whisper-large-v3

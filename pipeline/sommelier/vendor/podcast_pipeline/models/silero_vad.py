@@ -68,7 +68,14 @@ class SileroVAD:
                     self.get_speech_timestamps = get_speech_timestamps
                     return
             except Exception:
-                pass
+                if is_offline_mode() or local:
+                    raise
+
+            if is_offline_mode():
+                raise FileNotFoundError(
+                    f"No found model snakers4/silero-vad on path: {local_target}. "
+                    "Torch Hub fallback is disabled in offline mode."
+                )
 
             vad_model, utils = torch.hub.load(
                 repo_or_dir="snakers4/silero-vad" if not local else "vad/silero-vad",

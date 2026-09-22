@@ -108,6 +108,17 @@ def resolve_local_model_path(
                 if cand.exists():
                     return cand.resolve(), True
 
+    if is_offline_mode():
+        configured_path = os.environ.get(env_var, "") if env_var else ""
+        if not configured_path and base_dir and default_subpath:
+            configured_path = str(Path(base_dir) / default_subpath)
+        if not configured_path:
+            configured_path = default_subpath or str(model_identifier or "")
+        raise FileNotFoundError(
+            f"No found model {model_identifier or default_subpath} on path: {configured_path}. "
+            "Hub and Torch Hub fallback are disabled in offline mode."
+        )
+
     # 4. Fallback to model_identifier string (to be used with local_files_only=True)
     res_id = str(model_identifier) if model_identifier is not None else ""
     return res_id, False
@@ -235,6 +246,12 @@ def load_local_silero_vad(device: str = "cpu"):
 def _get_speech_timestamps_fallback(audio, model, threshold=0.5, sampling_rate=16000, min_speech_duration_ms=250, min_silence_duration_ms=100, **kwargs):
     """Fallback implementation of get_speech_timestamps for ONNX and JIT model weights."""
     import torch
+
+    audio = torch.as_tensor(audio, dtype=torch.float32)
+    try:
+        audio = audio.to(next(model.parameters()).device)
+    except (StopIteration, AttributeError):
+        pass
 
     window_size_samples = 512 if sampling_rate == 16000 else 256
     audio_length_samples = len(audio)
