@@ -3427,7 +3427,7 @@ if __name__ == "__main__":
                     interface_fetch = sb_interfaces.fetch
                     transfer_fetch = sb_parameter_transfer.fetch
 
-                    def _fetch_local(filename, _source, *fetch_args, **fetch_kwargs):
+                    def _fetch_local(filename, source, *fetch_args, **fetch_kwargs):
                         return sb_fetching.fetch(
                             filename, FetchSource(FetchFrom.LOCAL, str(local_root)),
                             *fetch_args, **fetch_kwargs,
