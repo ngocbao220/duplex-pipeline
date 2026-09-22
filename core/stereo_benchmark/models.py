@@ -232,12 +232,7 @@ def _speaker_encoder(device: str):
     offline = is_offline_mode()
     if offline:
         local_target = _speaker_model_path()
-        return EncoderClassifier.from_hparams(
-            source=str(local_target),
-            savedir=str(local_target) if Path(local_target).is_dir() else None,
-            run_opts={"device": device},
-            local_files_only=True,
-        )
+        return _load_local_speechbrain_encoder(EncoderClassifier, local_target, device)
     else:
         from core.model_utils import resolve_local_model_path
         target, is_dir = resolve_local_model_path(
@@ -260,9 +255,43 @@ def _speaker_model_path() -> Path:
     )
     return assert_local_model_exists(
         path,
-        required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
+        required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt", "mean_var_norm_emb.ckpt"],
         model_name_hint="SpeechBrain ECAPA",
     )
+
+
+def _load_local_speechbrain_encoder(encoder_classifier, local_target: Path, device: str):
+    """Load ECAPA without allowing its YAML pretrainer paths to contact the Hub."""
+    from speechbrain.inference import interfaces as sb_interfaces
+    from speechbrain.utils import fetching as sb_fetching
+    from speechbrain.utils import parameter_transfer as sb_parameter_transfer
+    from speechbrain.utils.fetching import FetchFrom, FetchSource
+
+    local_root = local_target.resolve()
+    original_interface_fetch = sb_interfaces.fetch
+    original_transfer_fetch = sb_parameter_transfer.fetch
+    original_fetching_fetch = sb_fetching.fetch
+
+    def fetch_local(filename, _source, *fetch_args, **fetch_kwargs):
+        return original_fetching_fetch(
+            filename, FetchSource(FetchFrom.LOCAL, str(local_root)), *fetch_args, **fetch_kwargs
+        )
+
+    # ECAPA hyperparams may embed a remote repo ID in pretrainer.paths.  Patch
+    # every SpeechBrain import binding only for this construction.
+    sb_interfaces.fetch = fetch_local
+    sb_parameter_transfer.fetch = fetch_local
+    sb_fetching.fetch = fetch_local
+    try:
+        return encoder_classifier.from_hparams(
+            source=FetchSource(FetchFrom.LOCAL, str(local_root)),
+            savedir=str(local_root),
+            run_opts={"device": device},
+        )
+    finally:
+        sb_interfaces.fetch = original_interface_fetch
+        sb_parameter_transfer.fetch = original_transfer_fetch
+        sb_fetching.fetch = original_fetching_fetch
 
 
 def _embeddings_many(audios: tuple[np.ndarray, np.ndarray], device: str) -> tuple[np.ndarray | None, np.ndarray | None]:

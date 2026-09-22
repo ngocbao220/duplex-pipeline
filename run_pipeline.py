@@ -333,6 +333,7 @@ def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
         sys.executable,
         str(ROOT_DIR / "scripts" / "benchmark_stereo.py"),
         "--corpus", str(corpus_dir),
+        "--env-config", str(ROOT_DIR / "configs" / "env" / f"{cfg.env.name}.yaml"),
         "--dnsmos-model-dir", str(dnsmos_dir),
         "--output-dir", str(bench_out_dir),
         "--workers", str(workers),

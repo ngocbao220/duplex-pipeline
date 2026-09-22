@@ -297,6 +297,44 @@ def test_speaker_bundle_requires_local_files_without_model_identifier(monkeypatc
         models._speaker_model_path()
 
 
+def test_benchmark_env_config_exports_server_local_model_paths(monkeypatch, tmp_path):
+    from core.stereo_benchmark.runtime import apply_environment_config
+
+    model_root = tmp_path / "duplex-model-dir"
+    config = tmp_path / "sever.yaml"
+    config.write_text(
+        """name: sever
+offline: true
+paths:
+  base_models: %s
+  speechbrain: ${env.paths.base_models}/spker
+  squim: ${env.paths.base_models}/squim_objective_dns2020.pth
+  nisqa: ${env.paths.base_models}/nisqa.tar
+  dnsmos: ${env.paths.base_models}/dnsmos
+""" % model_root,
+        encoding="utf-8",
+    )
+    for variable in ("SPEECHBRAIN_MODEL_PATH", "SQUIM_MODEL_PATH", "NISQA_MODEL_PATH", "DNSMOS_MODEL_PATH"):
+        monkeypatch.delenv(variable, raising=False)
+
+    paths = apply_environment_config(config)
+
+    assert paths["SPEECHBRAIN_MODEL_PATH"] == str(model_root / "spker")
+    assert paths["DNSMOS_MODEL_PATH"] == str(model_root / "dnsmos")
+    assert __import__("os").environ["SPEECHBRAIN_MODEL_PATH"] == str(model_root / "spker")
+
+
+def test_speaker_bundle_requires_all_local_ecapa_artifacts(monkeypatch, tmp_path):
+    import core.stereo_benchmark.models as models
+
+    monkeypatch.setenv("SPEECHBRAIN_MODEL_PATH", str(tmp_path))
+    for name in ("hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"):
+        (tmp_path / name).touch()
+
+    with pytest.raises(FileNotFoundError, match="mean_var_norm_emb.ckpt"):
+        models._speaker_model_path()
+
+
 def test_squim_requires_local_weights_without_hub_download(monkeypatch, tmp_path):
     import torch
     import core.stereo_benchmark.models as models
@@ -304,6 +342,11 @@ def test_squim_requires_local_weights_without_hub_download(monkeypatch, tmp_path
     models._squim_model.cache_clear()
     monkeypatch.delenv("SQUIM_MODEL_PATH", raising=False)
     monkeypatch.delenv("DUPLEX_MODEL_DIR", raising=False)
+    monkeypatch.delenv("MODE", raising=False)
+    monkeypatch.delenv("PIPELINE_MODE", raising=False)
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    monkeypatch.delenv("HF_DATASETS_OFFLINE", raising=False)
     monkeypatch.setattr(torch.hub, "get_dir", lambda: str(tmp_path))
 
     with pytest.raises(FileNotFoundError, match="SQUIM_MODEL_PATH"):
