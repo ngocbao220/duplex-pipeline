@@ -287,6 +287,18 @@ def test_nisqa_passes_checkpoint_compatibility_defaults_to_local_model(monkeypat
     assert seen["tr_num_workers"] == 0
 
 
+def test_model_preflight_explains_torch_torchaudio_abi_mismatch():
+    from core.stereo_benchmark.preflight import _model_load_failure
+
+    failure = _model_load_failure(
+        "SQUIM local initialization",
+        OSError("libtorchaudio.so: undefined symbol: _ZNK5torch8autograd4Node4nameB5cxx11Ev"),
+    )
+
+    assert "Torch/Torchaudio ABI mismatch" in failure
+    assert "same exact release" in failure
+
+
 def test_speaker_bundle_requires_local_files_without_model_identifier(monkeypatch, tmp_path):
     import core.stereo_benchmark.models as models
 

@@ -16,6 +16,12 @@ def ensure_runtime_compat() -> None:
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
     os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    # Some server launchers export empty cache paths.  Librosa/Numba later
+    # turn those into ``os.makedirs(\"\")`` before benchmark code can sanitize
+    # them, producing an unhelpful FileNotFoundError for DNSMOS/NISQA.
+    for cache_var in ("NUMBA_CACHE_DIR", "LIBROSA_CACHE_DIR", "XDG_CACHE_HOME"):
+        if os.environ.get(cache_var) == "":
+            os.environ.pop(cache_var)
     # 1. pkg_resources fallback for Python 3.12+ environments missing setuptools
     try:
         import pkg_resources  # noqa: F401

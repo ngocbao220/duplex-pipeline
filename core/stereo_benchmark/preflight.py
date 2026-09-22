@@ -60,7 +60,7 @@ def _check_speechbrain(device: str) -> dict:
         loc_desc = str(_speaker_model_path()) if is_offline_mode() else "speechbrain/spkrec-ecapa-voxceleb (Hub/local)"
         return _success(f"Resolved bundle: {loc_desc}; encoder initialized and smoke embedding completed")
     except Exception as exc:
-        return _failure("ERROR", f"SpeechBrain initialization failed: {type(exc).__name__}: {exc}")
+        return _failure("ERROR", _model_load_failure("SpeechBrain initialization", exc))
 
 
 def _check_squim(device: str) -> dict:
@@ -74,7 +74,7 @@ def _check_squim(device: str) -> dict:
             model(torch.from_numpy(_smoke_audio()).unsqueeze(0).to(device))
         return _success(f"Resolved local weight: {path}; initialized on {device} and smoke score completed")
     except Exception as exc:
-        return _failure("ERROR", f"SQUIM local initialization failed: {type(exc).__name__}: {exc}")
+        return _failure("ERROR", _model_load_failure("SQUIM local initialization", exc))
 
 
 def _check_nisqa(device: str) -> dict:
@@ -114,6 +114,16 @@ def _success(details: str) -> dict:
 
 def _failure(status: str, details: str) -> dict:
     return {"status": status, "details": details}
+
+
+def _model_load_failure(stage: str, error: Exception) -> str:
+    message = str(error)
+    if isinstance(error, OSError) and "libtorchaudio.so" in message and "undefined symbol" in message:
+        return (
+            f"{stage} failed: Torch/Torchaudio ABI mismatch ({message}). "
+            "Install torch and torchaudio as the same exact release and CUDA build in the active benchmark environment."
+        )
+    return f"{stage} failed: {type(error).__name__}: {error}"
 
 
 def print_model_check_summary(results: dict) -> None:

@@ -89,9 +89,13 @@ def _nisqa_one(audio: np.ndarray, device: str) -> dict:
 
         nisqa_target = _nisqa_checkpoint_path()
 
-        with tempfile.NamedTemporaryFile(suffix=".wav") as fp:
-            sf.write(fp.name, audio, SAMPLE_RATE)
-            model = nisqaModel(_nisqa_prediction_args(nisqa_target, Path(fp.name)))
+        # NISQA opens this path in a second audio backend.  A named open file
+        # can fail there on mounted or restrictive server filesystems.
+        with tempfile.TemporaryDirectory(prefix="nisqa-smoke-") as directory:
+            audio_path = Path(directory) / "input.wav"
+            sf.write(audio_path, audio, SAMPLE_RATE)
+            sf.info(audio_path)  # Report a WAV write/read problem before NISQA.
+            model = nisqaModel(_nisqa_prediction_args(nisqa_target, audio_path))
             res = model.predict()
             score = float(res["mos_pred"].iloc[0]) if hasattr(res, "iloc") else float(res["mos_pred"])
             return {"status": "ok", "nisqa_mos": score}
