@@ -365,6 +365,15 @@ def split_valid_dialogues(
     audio_duration_sec = float(waveform.shape[-1] / sample_rate)
     music_filter = load_music_filter(model_name=music_model, device=devices[0], enabled=filter_music) if filter_music else None
     lid_filter = load_whisper_lid_model(model_name_or_path=lid_model, device=devices[0], enabled=filter_vietnamese) if filter_vietnamese else None
+    music_filter_applied = bool(music_filter is not None and getattr(music_filter, "applied", False))
+    music_filter_reason = None if music_filter_applied else (
+        getattr(music_filter, "reason", "disabled") if music_filter is not None else "disabled"
+    )
+    music_filtered_dialogue_count = 0
+    if filter_music and music_filter_applied:
+        logger.info("Music filtering: Demucs '%s' active", music_model)
+    elif filter_music:
+        logger.warning("Music filtering requested but not applied: %s", music_filter_reason)
 
     output_root.mkdir(parents=True, exist_ok=True)
     dialogue_info = []
@@ -379,6 +388,8 @@ def split_valid_dialogues(
 
         if music_filter is not None:
             crop = music_filter.filter_waveform(crop, sample_rate)
+            if music_filter_applied:
+                music_filtered_dialogue_count += 1
 
         vi_prob = 1.0
         if lid_filter is not None:
@@ -460,6 +471,12 @@ def split_valid_dialogues(
         "skip_reason": skip_reason,
         "filter_music": filter_music,
         "music_model": music_model if filter_music else None,
+        "music_filter_status": {
+            "requested": filter_music,
+            "model_loaded": music_filter_applied,
+            "filtered_dialogue_count": music_filtered_dialogue_count,
+            "reason": music_filter_reason,
+        },
         "filter_vietnamese": filter_vietnamese,
         "lid_model": lid_model if filter_vietnamese else None,
         "min_vi_prob": min_vi_prob if filter_vietnamese else None,

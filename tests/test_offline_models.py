@@ -275,6 +275,30 @@ def test_sommelier_reads_two_speaker_turns_from_a_split_dialogue_manifest(tmp_pa
     ]
 
 
+def test_sommelier_backfills_old_split_manifest_after_valid_raw_result(tmp_path):
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "pipeline" / "sommelier" / "src"))
+    from sommelier.runner import backfill_split_diarization, load_split_diarization
+
+    dialogue = tmp_path / "dialogue_1.wav"
+    dialogue.touch()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"dialogues": [{"filename": dialogue.name}]}))
+    sommelier_manifest = tmp_path / "sommelier.json"
+    sommelier_manifest.write_text(json.dumps({"segments": [
+        {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"},
+        {"start": 1.0, "end": 2.0, "speaker": "SPEAKER_01"},
+    ]}))
+
+    assert backfill_split_diarization(dialogue, sommelier_manifest) is True
+    assert load_split_diarization(dialogue) == [
+        {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"},
+        {"start": 1.0, "end": 2.0, "speaker": "SPEAKER_01"},
+    ]
+
+
 def test_sommelier_speechbrain_preflight_requires_mean_var_norm_checkpoint(tmp_path):
     import sys
 

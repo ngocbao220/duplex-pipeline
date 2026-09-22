@@ -17,16 +17,20 @@ def load_music_filter(
     enabled: bool = True,
 ) -> DemucsMusicFilter | NoOpMusicFilter:
     if not enabled:
-        return NoOpMusicFilter()
+        return NoOpMusicFilter(reason="disabled")
     try:
         return DemucsMusicFilter(model_name=model_name, device=device)
     except Exception as exc:
         LOGGER.warning("Could not load Demucs music filter model '%s': %s", model_name, exc)
-        return NoOpMusicFilter()
+        return NoOpMusicFilter(reason=f"Demucs load failed: {exc}")
 
 
 class NoOpMusicFilter:
     """Fallback filter when music filtering is disabled or Demucs is unavailable."""
+    applied = False
+
+    def __init__(self, reason: str = "disabled") -> None:
+        self.reason = reason
 
     def filter_waveform(self, waveform: torch.Tensor, sample_rate: int) -> torch.Tensor:
         return waveform.clone()
@@ -34,6 +38,7 @@ class NoOpMusicFilter:
 
 class DemucsMusicFilter:
     """Separate and suppress background music/accompaniment using Demucs (htdemucs)."""
+    applied = True
 
     def __init__(self, model_name: str = "htdemucs", device: str = "auto") -> None:
         try:
@@ -74,6 +79,7 @@ class DemucsMusicFilter:
 
         self.model.to(self.device)
         self.model.eval()
+        LOGGER.info("Demucs music filter '%s' loaded on %s", model_name, self.device)
 
     def filter_waveform(self, waveform: torch.Tensor, sample_rate: int) -> torch.Tensor:
         """Filter background music from a 1D or 2D (channels, time) waveform tensor."""

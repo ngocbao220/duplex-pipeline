@@ -137,6 +137,12 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
         {"start": 0.0, "end": 6.0, "speaker": "A"},
         {"start": 6.0, "end": 12.0, "speaker": "B"},
     ]
+    assert manifest["music_filter_status"] == {
+        "requested": False,
+        "model_loaded": False,
+        "filtered_dialogue_count": 0,
+        "reason": "disabled",
+    }
     assert manifest["filter_summary"]["candidate_dialogue_count"] == 1
     assert manifest["filter_summary"]["exported_dialogue_count"] == 1
     assert manifest["filter_summary"]["lid"]["enabled"] is False

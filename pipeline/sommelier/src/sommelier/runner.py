@@ -38,6 +38,51 @@ def load_split_diarization(source: Path) -> list[dict] | None:
     return normalized
 
 
+def backfill_split_diarization(source: Path, sommelier_manifest: Path) -> bool:
+    """Persist a successful raw Sommelier two-speaker result into an old split manifest."""
+    manifest_path = source.parent / "manifest.json"
+    try:
+        result = json.loads(sommelier_manifest.read_text(encoding="utf-8"))
+        turns = [
+            {
+                "start": round(float(segment["start"]), 6),
+                "end": round(float(segment["end"]), 6),
+                "speaker": str(segment["speaker"]),
+            }
+            for segment in result["segments"]
+        ]
+        if not turns or len({turn["speaker"] for turn in turns}) != 2:
+            return False
+        if any(turn["start"] < 0 or turn["end"] <= turn["start"] for turn in turns):
+            return False
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return False
+
+    # A batch may process multiple dialogue_N.wav files from the same source.
+    # Serialize the read-modify-replace operation so one backfill never erases
+    # turns written by another completed clip.
+    lock_path = manifest_path.with_name(".manifest.backfill.lock")
+    try:
+        import fcntl
+
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                dialogue = next(row for row in manifest["dialogues"] if row.get("filename") == source.name)
+                if dialogue.get("speaker_turns"):
+                    return False
+                dialogue["speaker_turns"] = turns
+                temporary = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+                temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                temporary.replace(manifest_path)
+                return True
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    except (OSError, ValueError, KeyError, StopIteration, TypeError, json.JSONDecodeError):
+        return False
+
+
 def validate_offline_models(*, reuse_split_diarization: bool = False) -> None:
     """Reject incomplete Sommelier model paths before starting the vendor process."""
     if not is_offline_mode():
@@ -163,6 +208,8 @@ def run(source: Path, output: Path, config: dict):
     if not manifests:
         raise RuntimeError("Sommelier completed without its JSON manifest")
     manifest_path = str(manifests[-1])
+    if split_turns is None and backfill_split_diarization(source, manifests[-1]):
+        logger.info("Backfilled split-dialogue manifest with Sommelier 2-speaker turns: %s", source.parent / "manifest.json")
 
     stereo = _reconstruct_tracks(source, manifests[-1], output)
 
