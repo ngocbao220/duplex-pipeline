@@ -18,17 +18,41 @@ from core.orchestration.logging_style import get_logger, section  # noqa: E402
 from core.model_utils import is_offline_mode  # noqa: E402
 
 
-def validate_offline_models() -> None:
+def load_split_diarization(source: Path) -> list[dict] | None:
+    """Load the two-speaker turns exported beside a ``dialogue_N.wav`` clip."""
+    manifest_path = source.parent / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        dialogue = next(item for item in manifest["dialogues"] if item.get("filename") == source.name)
+        turns = dialogue["speaker_turns"]
+        normalized = [
+            {"start": float(turn["start"]), "end": float(turn["end"]), "speaker": str(turn["speaker"])}
+            for turn in turns
+        ]
+    except (OSError, ValueError, KeyError, StopIteration, TypeError, json.JSONDecodeError):
+        return None
+    if not normalized or len({turn["speaker"] for turn in normalized}) != 2:
+        return None
+    if any(turn["start"] < 0 or turn["end"] <= turn["start"] for turn in normalized):
+        return None
+    return normalized
+
+
+def validate_offline_models(*, reuse_split_diarization: bool = False) -> None:
     """Reject incomplete Sommelier model paths before starting the vendor process."""
     if not is_offline_mode():
         return
 
     checks = (
-        ("Silero VAD", "SILERO_VAD_MODEL_PATH", _is_silero_vad_bundle),
-        ("Sortformer", "SORTFORMER_MODEL_PATH", _is_sortformer_bundle),
         ("SpeechBrain ECAPA", "SPEECHBRAIN_MODEL_PATH", _is_speechbrain_bundle),
         ("SepReformer", "SEPREFORMER", _is_sepreformer_checkpoint),
     )
+    if not reuse_split_diarization:
+        checks = (
+            ("Silero VAD", "SILERO_VAD_MODEL_PATH", _is_silero_vad_bundle),
+            ("Sortformer", "SORTFORMER_MODEL_PATH", _is_sortformer_bundle),
+            *checks,
+        )
     logger = get_logger("sommelier")
     missing = []
     for name, env_var, validator in checks:
@@ -72,7 +96,8 @@ def run(source: Path, output: Path, config: dict):
     import re
     logger = get_logger("sommelier")
     token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN") or "hf_offline_local_token"
-    validate_offline_models()
+    split_turns = load_split_diarization(source)
+    validate_offline_models(reuse_split_diarization=split_turns is not None)
     _stage_sepreformer_checkpoint()
     native = output / f"native_{source.stem}"
     input_dir = native / "input"
@@ -128,6 +153,11 @@ def run(source: Path, output: Path, config: dict):
             "--speaker-link-threshold", str(config.get("speaker_link_threshold", 0.75)),
             "--max-chunk-duration", str(config.get("max_chunk_duration", 300.0)),
         ]
+        if split_turns is not None:
+            turns_path = Path(temporary) / "split_diarization.json"
+            turns_path.write_text(json.dumps({"segments": split_turns}), encoding="utf-8")
+            command.extend(["--segments-json", str(turns_path)])
+            logger.info("Reusing split-dialogue diarization: %d turns, 2 speakers; skipping VAD + Sortformer.", len(split_turns))
         subprocess.run(command, cwd=vendor, env=env, check=True)
     manifests = sorted(input_dir.rglob(f"{source.stem}.json"), key=lambda path: path.stat().st_mtime)
     if not manifests:

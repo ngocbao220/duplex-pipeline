@@ -252,6 +252,29 @@ def test_sommelier_run_stops_before_vendor_subprocess_when_offline_models_are_mi
     assert not output.exists()
 
 
+def test_sommelier_reads_two_speaker_turns_from_a_split_dialogue_manifest(tmp_path):
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "pipeline" / "sommelier" / "src"))
+    from sommelier.runner import load_split_diarization
+
+    dialogue = tmp_path / "dialogue_1.wav"
+    dialogue.touch()
+    (tmp_path / "manifest.json").write_text(json.dumps({"dialogues": [{
+        "filename": "dialogue_1.wav",
+        "speaker_turns": [
+            {"start": 0.0, "end": 1.0, "speaker": "A"},
+            {"start": 1.0, "end": 2.0, "speaker": "B"},
+        ],
+    }]}))
+
+    assert load_split_diarization(dialogue) == [
+        {"start": 0.0, "end": 1.0, "speaker": "A"},
+        {"start": 1.0, "end": 2.0, "speaker": "B"},
+    ]
+
+
 def test_sommelier_speechbrain_preflight_requires_mean_var_norm_checkpoint(tmp_path):
     import sys
 

@@ -252,11 +252,17 @@ def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
 def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
     """Phase 2 (Sommelier): Overlap detection, SepReformer separation & track reconstruction."""
     print(section("Sommelier"))
-    input_dir = _resolve_raw_data_dir(cfg)
+    dialogue_dir = Path(cfg.data.dialogue_dir)
+    input_dir = dialogue_dir if dialogue_dir.exists() else _resolve_raw_data_dir(cfg)
     sommelier_out_dir = Path(cfg.data.sommelier_out_dir)
 
+    if input_dir == dialogue_dir:
+        logger.info("Using split-dialogue input with inherited 2-speaker turns: %s", input_dir)
+    else:
+        logger.info("Split-dialogue input is unavailable; using raw audio with VAD + Sortformer: %s", input_dir)
+
     if not input_dir.exists() and not cfg.dry_run:
-        logger.info("Raw input directory %s does not exist. Skipping Sommelier step.", input_dir)
+        logger.info("Sommelier input directory %s does not exist. Skipping Sommelier step.", input_dir)
         return 0
 
     workers = cfg.get("workers") or cfg.get("optimization", {}).get("workers", 2)

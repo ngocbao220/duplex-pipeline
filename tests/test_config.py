@@ -188,6 +188,34 @@ def test_sommelier_pre_asr_path_does_not_import_korean_g2p_at_module_load():
     assert "if args.korean and not args.until_pre_asr:" in source
 
 
+def test_sommelier_accepts_split_diarization_to_skip_vad_and_sortformer():
+    root = Path(__file__).resolve().parents[1]
+    runner_source = (root / "pipeline" / "sommelier" / "src" / "sommelier" / "runner.py").read_text()
+    vendor_source = (root / "pipeline" / "sommelier" / "vendor" / "podcast_pipeline" / "main_original_ASR_MoE.py").read_text()
+
+    assert "load_split_diarization(source)" in runner_source
+    assert '"--segments-json"' in runner_source
+    assert "--segments-json" in vendor_source
+    assert "VAD + Sortformer skipped" in vendor_source
+    assert "Using local SpeechBrain ECAPA for cross-chunk speaker linking" in vendor_source
+
+
+def test_sommelier_raw_path_degrades_to_two_tracks_when_embeddings_are_unavailable():
+    root = Path(__file__).resolve().parents[1]
+    vendor_source = (root / "pipeline" / "sommelier" / "vendor" / "podcast_pipeline" / "main_original_ASR_MoE.py").read_text()
+
+    assert "degraded speaker assignment" in vendor_source
+    assert "Cannot constrain speaker inventory without pyannote embeddings" not in vendor_source
+    assert "See preceding ffmpeg stderr" in vendor_source
+
+
+def test_sommelier_phase_prefers_existing_split_dialogue_input():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "run_pipeline.py").read_text()
+
+    assert "input_dir = dialogue_dir if dialogue_dir.exists() else _resolve_raw_data_dir(cfg)" in source
+
+
 def test_hydra_config_declares_cholimex_as_a_refinement_output():
     root = Path(__file__).resolve().parents[1]
     import yaml

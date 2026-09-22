@@ -410,6 +410,15 @@ def split_valid_dialogues(
             "duration": dialogue.end - dialogue.start,
             "vietnamese_probability": round(vi_prob, 4),
             "reason": dialogue.reason,
+            "speaker_turns": [
+                {
+                    "start": round(max(float(segment["start"]), dialogue.start) - dialogue.start, 6),
+                    "end": round(min(float(segment["end"]), dialogue.end) - dialogue.start, 6),
+                    "speaker": str(segment["speaker"]),
+                }
+                for segment in dialogue.segments
+                if float(segment["end"]) > dialogue.start and float(segment["start"]) < dialogue.end
+            ],
         })
         candidate_dialogues.append({
             "candidate_index": index + 1,
@@ -600,4 +609,3 @@ def separate_dialogue_files(
         "elapsed_sec": elapsed,
         "rtf": rtf,
     }
-

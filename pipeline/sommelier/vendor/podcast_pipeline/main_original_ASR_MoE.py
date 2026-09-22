@@ -554,7 +554,19 @@ def standardization(audio):
 
     if isinstance(audio, str):
         name = os.path.basename(audio)
-        audio = AudioSegment.from_file(audio)
+        try:
+            audio = AudioSegment.from_file(audio)
+        except Exception as error:
+            # pydub's exception text frequently keeps only the ffmpeg return
+            # code.  Preserve its stderr in the server log so a corrupt input
+            # can be distinguished from an ffmpeg/runtime failure.
+            stderr = getattr(error, "stderr", b"")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            logger.error("Failed to decode audio with ffmpeg: %s\n%s", audio, stderr or error)
+            raise RuntimeError(
+                f"Could not decode audio file with ffmpeg: {audio}. See preceding ffmpeg stderr."
+            ) from error
     elif isinstance(audio, AudioSegment):
         name = f"audio_{audio_count}"
         audio_count += 1
@@ -2041,6 +2053,21 @@ def df_to_list(df: pd.DataFrame) -> list[dict]:
     return records
 
 
+def load_reused_split_segments(path: str, audio_duration: float) -> list[dict]:
+    """Validate two-speaker turns exported by DuplexChat for this dialogue clip."""
+    with open(path, encoding="utf-8") as handle:
+        raw_segments = json.load(handle).get("segments", [])
+    segments = []
+    for index, segment in enumerate(raw_segments):
+        start, end = float(segment["start"]), float(segment["end"])
+        if start < 0 or end <= start or end > audio_duration + 0.01:
+            raise ValueError(f"Invalid reused speaker turn {index}: {segment}")
+        segments.append({"index": f"{index:05d}", "start": start, "end": min(end, audio_duration), "speaker": str(segment["speaker"])})
+    if len({segment["speaker"] for segment in segments}) != 2:
+        raise ValueError("Reused split diarization must contain exactly 2 speakers")
+    return segments
+
+
 def deduplicate_segments_by_index(segments: list[dict], logger=None) -> list[dict]:
     """
     Ensure each segment index is unique, keeping the first occurrence.
@@ -2379,7 +2406,20 @@ def constrain_speaker_inventory(segment_list, audio_info, embedder: Inference | 
     if expected_speakers <= 0 or len(speakers) <= expected_speakers:
         return segment_list
     if embedder is None:
-        raise RuntimeError("Cannot constrain speaker inventory without pyannote embeddings")
+        # The Sortformer labels are local to one recording.  When a local
+        # embedding model is unavailable, retain the established deterministic
+        # two-track fallback instead of failing the entire sample.  Offline
+        # preflight still reports a missing ECAPA bundle before a server run.
+        logger.warning(
+            "Speaker embedder unavailable; constraining %d Sortformer labels to %d tracks "
+            "by stable label order (degraded speaker assignment).",
+            len(speakers), expected_speakers,
+        )
+        mapping = {
+            speaker: f"SPEAKER_{min(index, expected_speakers - 1):02d}"
+            for index, speaker in enumerate(speakers)
+        }
+        return [{**segment, "speaker": mapping[segment["speaker"]]} for segment in segment_list]
 
     # 1. First collect candidates and try to extract embeddings
     centroids = {}
@@ -2712,7 +2752,10 @@ def main_process(audio_path, save_path=None, audio_name=None,
         step0_start = time.time()
         audio = standardization(audio_path)
         max_chunk = getattr(args, "max_chunk_duration", 300.0)
-        diar_chunks, temp_chunk_dir = prepare_diarization_chunks(audio_path, audio, max_duration=max_chunk)
+        if args.segments_json:
+            diar_chunks, temp_chunk_dir = [], None
+        else:
+            diar_chunks, temp_chunk_dir = prepare_diarization_chunks(audio_path, audio, max_duration=max_chunk)
         step0_end = time.time()
 
         # Calculate total audio duration
@@ -2722,53 +2765,45 @@ def main_process(audio_path, save_path=None, audio_name=None,
         step0_rt = step0_time / audio_duration if audio_duration > 0 else 0
         logger.info(f"Step 0: Preprocess - Processing time: {step0_time:.2f}s, RT factor: {step0_rt:.4f}")
 
-        logger.info("Step 2: Speaker Diarization")
-        dia_start = time.time()
-
-
-        diarization_frames = []
-        try:
-            for chunk in diar_chunks:
-                predicted_segments, _ = diar_model.diarize(
-                    audio=chunk["path"], batch_size=1, include_tensor_outputs=True
-                )
-                chunk_df = sortformer_dia(predicted_segments)
-                if not chunk_df.empty:
-                    chunk_df["start"] += chunk["offset"]
-                    chunk_df["end"] += chunk["offset"]
-                    chunk_df = _apply_sortformer_segment_padding_from_args(
-                        chunk_df, args=args, logger=logger, audio_duration=audio_duration
-                    )
-                diarization_frames.append(chunk_df)
-        finally:
-            if temp_chunk_dir:
-                shutil.rmtree(temp_chunk_dir, ignore_errors=True)
-
-        if diarization_frames:
-            diarization_frames = align_speakers_across_chunks(
-                diarization_frames,
-                audio_info=audio,
-                embedder=speaker_embedder,
-                similarity_threshold=speaker_link_threshold,
-            )
-
-        if diarization_frames:
-            speakerdia = pd.concat(diarization_frames, ignore_index=True)
+        if args.segments_json:
+            segment_list = load_reused_split_segments(args.segments_json, audio_duration)
+            vad_sortformer_processing_time = 0.0
+            vad_sortformer_rt = 0.0
+            logger.info("Step 2: Reusing 2-speaker split diarization; VAD + Sortformer skipped")
         else:
-            speakerdia = pd.DataFrame(columns=["segment", "label", "speaker", "start", "end"])
-        ori_list = df_to_list(speakerdia)
-        dia_end = time.time()
+            logger.info("Step 2: Speaker Diarization")
+            dia_start = time.time()
+            diarization_frames = []
+            try:
+                for chunk in diar_chunks:
+                    predicted_segments, _ = diar_model.diarize(
+                        audio=chunk["path"], batch_size=1, include_tensor_outputs=True
+                    )
+                    chunk_df = sortformer_dia(predicted_segments)
+                    if not chunk_df.empty:
+                        chunk_df["start"] += chunk["offset"]
+                        chunk_df["end"] += chunk["offset"]
+                        chunk_df = _apply_sortformer_segment_padding_from_args(
+                            chunk_df, args=args, logger=logger, audio_duration=audio_duration
+                        )
+                    diarization_frames.append(chunk_df)
+            finally:
+                if temp_chunk_dir:
+                    shutil.rmtree(temp_chunk_dir, ignore_errors=True)
+            if diarization_frames:
+                diarization_frames = align_speakers_across_chunks(
+                    diarization_frames, audio_info=audio, embedder=speaker_embedder,
+                    similarity_threshold=speaker_link_threshold,
+                )
+            speakerdia = pd.concat(diarization_frames, ignore_index=True) if diarization_frames else pd.DataFrame(
+                columns=["segment", "label", "speaker", "start", "end"]
+            )
+            segment_list = df_to_list(speakerdia)
+            vad_sortformer_processing_time = time.time() - dia_start
+            vad_sortformer_rt = vad_sortformer_processing_time / audio_duration if audio_duration > 0 else 0
+            logger.info(f"VAD + Sortformer - Processing time: {vad_sortformer_processing_time:.2f}s, RT factor: {vad_sortformer_rt:.4f}")
 
-        # Calculate VAD + Sortformer RT factor
-        vad_sortformer_processing_time = dia_end - dia_start
-        vad_sortformer_rt = vad_sortformer_processing_time / audio_duration if audio_duration > 0 else 0
-        logger.info(f"VAD + Sortformer - Processing time: {vad_sortformer_processing_time:.2f}s, RT factor: {vad_sortformer_rt:.4f}")
-
-        # TEST
-        ######################
-        segment_list = ori_list
         segment_list = split_long_segments(segment_list)
-        ######################
 
         # [Fixed] Execute Step 3 before Step 2.5!
         # Step 3: Background Music Detection and Removal
@@ -3148,6 +3183,12 @@ if __name__ == "__main__":
         default=None,
         help="Constrain recording-level diarization labels to this many speakers using embeddings.",
     )
+    parser.add_argument(
+        "--segments-json",
+        type=str,
+        default=None,
+        help="Validated DuplexChat split-dialogue speaker turns; skips VAD and Sortformer.",
+    )
 
     parser.add_argument(
         "--overlap_threshold",
@@ -3310,9 +3351,11 @@ if __name__ == "__main__":
         # Client initialization
     #client = OpenAI(api_key="YOUR_API_KEY")
     model_name = "gpt-4.1"
-    # VAD
-    logger.debug(" * Loading VAD Model")
-    vad = silero_vad.SileroVAD(device=device)
+    # VAD is needed only to construct fresh diarization chunks.
+    vad = None
+    if not args.segments_json:
+        logger.debug(" * Loading VAD Model")
+        vad = silero_vad.SileroVAD(device=device)
     
     # English segment detection pattern: word groups connected by consecutive alphabets, apostrophes, and spaces
     ENG_PATTERN = re.compile(r"[A-Za-z][A-Za-z']*(?: [A-Za-z][A-Za-z']*)*")
@@ -3334,40 +3377,42 @@ if __name__ == "__main__":
         speaker_embedder = None
 
     # Load Sortformer model from local storage or Hugging Face
-    sort_target = os.environ.get("SORTFORMER_MODEL_PATH") or "nvidia/diar_streaming_sortformer_4spk-v2.1"
-    sortformer_path, is_sort_local = resolve_local_model_path(
-        sort_target,
-        env_var="SORTFORMER_MODEL_PATH",
-        default_subpath="diar_streaming_sortformer_4spk-v2.1"
-    )
-    if not (Path(sortformer_path).exists() if is_sort_local else False):
+    diar_model = None
+    if args.segments_json:
+        logger.info(" * Skipping Sortformer load; using split-dialogue speaker turns")
+    else:
+        sort_target = os.environ.get("SORTFORMER_MODEL_PATH") or "nvidia/diar_streaming_sortformer_4spk-v2.1"
         sortformer_path, is_sort_local = resolve_local_model_path(
-            "nvidia/diar_sortformer_4spk-v1",
+            sort_target,
             env_var="SORTFORMER_MODEL_PATH",
-            default_subpath="diar_sortformer_4spk-v1"
+            default_subpath="diar_streaming_sortformer_4spk-v2.1"
         )
-    if is_sort_local:
-        sortformer_location = Path(sortformer_path)
-        if sortformer_location.is_file() and sortformer_location.suffix == ".nemo":
-            sortformer_checkpoint = sortformer_location
-        elif sortformer_location.is_dir():
-            checkpoints = sorted(sortformer_location.glob("*.nemo"))
-            sortformer_checkpoint = checkpoints[0] if checkpoints else None
-        else:
-            sortformer_checkpoint = None
-        if sortformer_checkpoint is None:
+        if not (Path(sortformer_path).exists() if is_sort_local else False):
+            sortformer_path, is_sort_local = resolve_local_model_path(
+                "nvidia/diar_sortformer_4spk-v1",
+                env_var="SORTFORMER_MODEL_PATH",
+                default_subpath="diar_sortformer_4spk-v1"
+            )
+        if is_sort_local:
+            sortformer_location = Path(sortformer_path)
+            if sortformer_location.is_file() and sortformer_location.suffix == ".nemo":
+                sortformer_checkpoint = sortformer_location
+            elif sortformer_location.is_dir():
+                checkpoints = sorted(sortformer_location.glob("*.nemo"))
+                sortformer_checkpoint = checkpoints[0] if checkpoints else None
+            else:
+                sortformer_checkpoint = None
+            if sortformer_checkpoint is None:
+                logger.error("No found model Sortformer on path: %s", sortformer_path)
+                raise FileNotFoundError(f"No found model Sortformer on path: {sortformer_path}")
+            logger.info(" * Restoring local Sortformer checkpoint: %s", sortformer_checkpoint)
+            diar_model = SortformerEncLabelModel.restore_from(str(sortformer_checkpoint), map_location=device)
+        elif is_offline_mode():
             logger.error("No found model Sortformer on path: %s", sortformer_path)
             raise FileNotFoundError(f"No found model Sortformer on path: {sortformer_path}")
-        logger.info(" * Restoring local Sortformer checkpoint: %s", sortformer_checkpoint)
-        diar_model = SortformerEncLabelModel.restore_from(
-            str(sortformer_checkpoint), map_location=device
-        )
-    elif is_offline_mode():
-        logger.error("No found model Sortformer on path: %s", sortformer_path)
-        raise FileNotFoundError(f"No found model Sortformer on path: {sortformer_path}")
-    else:
-        diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path))
-    diar_model.eval()
+        else:
+            diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path))
+        diar_model.eval()
 
     # Initialize Speaker Embedding model (only when sepreformer is enabled)
     embedding_model = None
@@ -3466,7 +3511,22 @@ if __name__ == "__main__":
                         emb = self.classifier.encode_batch(x)
                         return emb.squeeze(1)
 
+                class SpeechBrainInferenceWrapper:
+                    """Adapt local ECAPA to the callable interface used for chunk linking."""
+                    sample_rate = 16000
+
+                    def __init__(self, classifier):
+                        self.classifier = classifier
+
+                    def __call__(self, sample):
+                        waveform = sample["waveform"]
+                        with torch.inference_mode():
+                            return self.classifier.encode_batch(waveform).squeeze()
+
                 embedding_model = SpeechBrainEmbeddingWrapper(sb_classifier)
+                if speaker_embedder is None:
+                    speaker_embedder = SpeechBrainInferenceWrapper(sb_classifier)
+                    logger.info(" * Using local SpeechBrain ECAPA for cross-chunk speaker linking")
                 logger.info(" * Loaded local SpeechBrain ECAPA-TDNN as embedding model for SepReformer")
             except Exception as sb_err:
                 if is_offline_mode():

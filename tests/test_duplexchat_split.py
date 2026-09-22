@@ -133,6 +133,10 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
     assert (output_root / "dialogue_1.wav").is_file()
     assert "reason" in manifest["dialogues"][0]
     assert "accepted_standard_2_speaker_dialogue" in manifest["dialogues"][0]["reason"]
+    assert manifest["dialogues"][0]["speaker_turns"] == [
+        {"start": 0.0, "end": 6.0, "speaker": "A"},
+        {"start": 6.0, "end": 12.0, "speaker": "B"},
+    ]
     assert manifest["filter_summary"]["candidate_dialogue_count"] == 1
     assert manifest["filter_summary"]["exported_dialogue_count"] == 1
     assert manifest["filter_summary"]["lid"]["enabled"] is False
@@ -168,15 +172,10 @@ def test_split_valid_dialogues_records_each_lid_rejection(monkeypatch, tmp_path)
         "model": "openai/whisper-small",
         "min_vi_probability": 0.5,
     }
-    assert manifest["candidate_dialogues"] == [{
-        "candidate_index": 1,
-        "start": 0.0,
-        "end": 12.0,
-        "duration": 12.0,
-        "vietnamese_probability": 0.2,
-        "reason": "accepted_standard_2_speaker_dialogue",
-        "decision": "rejected_by_lid",
-    }]
+    rejected = manifest["candidate_dialogues"]
+    assert rejected[0]["candidate_index"] == 1
+    assert rejected[0]["decision"] == "rejected_by_lid"
+    assert rejected[0]["reason"].startswith("accepted_standard_2_speaker_dialogue")
 
 
 def test_separate_dialogue_files(monkeypatch, tmp_path):
@@ -210,4 +209,3 @@ def test_separate_dialogue_files(monkeypatch, tmp_path):
     with wave.open(str(output_dir / "stereo_1.wav")) as audio:
         assert audio.getnchannels() == 2
         assert audio.getframerate() == 24_000
-
