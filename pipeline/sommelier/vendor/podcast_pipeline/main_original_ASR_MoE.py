@@ -3409,7 +3409,7 @@ if __name__ == "__main__":
                 if is_offline_mode():
                     assert_local_model_exists(
                         sb_path,
-                        required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
+                        required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt", "mean_var_norm_emb.ckpt"],
                         model_name_hint="SpeechBrain ECAPA",
                     )
                     speechbrain_bundle_validated = True
@@ -3426,17 +3426,26 @@ if __name__ == "__main__":
                     local_root = Path(sb_path).resolve()
                     interface_fetch = sb_interfaces.fetch
                     transfer_fetch = sb_parameter_transfer.fetch
+                    fetching_fetch = sb_fetching.fetch
 
                     def _fetch_local(filename, source, *fetch_args, **fetch_kwargs):
-                        return sb_fetching.fetch(
+                        # Some SpeechBrain ECAPA hyperparams hard-code the
+                        # Hub repo in ``pretrainer.paths``.  Ignore that
+                        # source: all required artifacts were validated in
+                        # local_root above.  Keep the original function so
+                        # replacing sb_fetching.fetch below cannot recurse.
+                        return fetching_fetch(
                             filename, FetchSource(FetchFrom.LOCAL, str(local_root)),
                             *fetch_args, **fetch_kwargs,
                         )
 
                     # The ECAPA YAML can contain repo IDs in pretrainer.paths.
-                    # Override both SpeechBrain call sites for this load only.
+                    # SpeechBrain keeps fetch references both in modules that
+                    # imported it and on the fetching module itself; override
+                    # every reference for this load only.
                     sb_interfaces.fetch = _fetch_local
                     sb_parameter_transfer.fetch = _fetch_local
+                    sb_fetching.fetch = _fetch_local
                 try:
                     sb_classifier = EncoderClassifier.from_hparams(
                         source=sb_source,
@@ -3447,6 +3456,7 @@ if __name__ == "__main__":
                     if is_sb_local:
                         sb_interfaces.fetch = interface_fetch
                         sb_parameter_transfer.fetch = transfer_fetch
+                        sb_fetching.fetch = fetching_fetch
 
                 class SpeechBrainEmbeddingWrapper(torch.nn.Module):
                     def __init__(self, classifier):

@@ -308,7 +308,7 @@ def _log_preflight_info(args, input_dir: Path, output_dir: Path) -> None:
         models_to_check.append((
             "Speaker Embedding", "speechbrain/spkrec-ecapa-voxceleb", "SPEECHBRAIN_MODEL_PATH",
             "spkrec-ecapa-voxceleb",
-            ["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
+            ["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt", "mean_var_norm_emb.ckpt"],
         ))
         hf_token_set = bool(os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN"))
         token_status = "CONFIGURED" if hf_token_set else "OPTIONAL (Local models used in offline mode)"

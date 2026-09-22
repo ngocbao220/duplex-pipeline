@@ -252,6 +252,23 @@ def test_sommelier_run_stops_before_vendor_subprocess_when_offline_models_are_mi
     assert not output.exists()
 
 
+def test_sommelier_speechbrain_preflight_requires_mean_var_norm_checkpoint(tmp_path):
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "pipeline" / "sommelier" / "src"))
+    from sommelier.runner import _is_speechbrain_bundle
+
+    bundle = tmp_path / "spkrec-ecapa-voxceleb"
+    bundle.mkdir()
+    for filename in ("hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"):
+        (bundle / filename).touch()
+
+    assert _is_speechbrain_bundle(bundle) is False
+    (bundle / "mean_var_norm_emb.ckpt").touch()
+    assert _is_speechbrain_bundle(bundle) is True
+
+
 def test_sommelier_local_sortformer_uses_nemo_restore_not_hub_pretrained():
     root = Path(__file__).resolve().parents[1]
     source = (root / "pipeline" / "sommelier" / "vendor" / "podcast_pipeline" / "main_original_ASR_MoE.py").read_text()
@@ -271,4 +288,6 @@ def test_sommelier_local_speechbrain_forces_speechbrain_local_fetch_source():
     assert "SpeechBrain ECAPA local bundle validated:" in local_loader
     assert "Failed to load local SpeechBrain ECAPA on path:" in local_loader
     assert "sb_parameter_transfer.fetch = _fetch_local" in local_loader
+    assert "sb_fetching.fetch = _fetch_local" in local_loader
+    assert "fetching_fetch = sb_fetching.fetch" in local_loader
     assert "def _fetch_local(filename, source," in local_loader

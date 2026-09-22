@@ -287,7 +287,7 @@ def test_speechbrain_preflight_requires_the_complete_local_bundle(monkeypatch, t
 
     _path, status, valid = batch._check_model_status(
         "Speaker Embedding", "speechbrain/spkrec-ecapa-voxceleb", "SPEECHBRAIN_MODEL_PATH",
-        "spkrec-ecapa-voxceleb", ["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
+        "spkrec-ecapa-voxceleb", ["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt", "mean_var_norm_emb.ckpt"],
     )
 
     assert valid is False

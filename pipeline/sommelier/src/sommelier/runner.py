@@ -60,6 +60,7 @@ def _is_sortformer_bundle(path: Path) -> bool:
 def _is_speechbrain_bundle(path: Path) -> bool:
     return path.is_dir() and all((path / name).is_file() for name in (
         "hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt",
+        "mean_var_norm_emb.ckpt",
     ))
 
 
@@ -271,4 +272,3 @@ def _reconstruct_tracks(source: Path, manifest_path: Path, output: Path) -> Path
 
     sf.write(stereo, out_samples, out_rate, subtype="PCM_16")
     return stereo
-
