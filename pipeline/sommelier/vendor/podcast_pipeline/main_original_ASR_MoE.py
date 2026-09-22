@@ -3346,11 +3346,26 @@ if __name__ == "__main__":
             env_var="SORTFORMER_MODEL_PATH",
             default_subpath="diar_sortformer_4spk-v1"
         )
-    try:
-        diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path), local_files_only=True)
-    except TypeError:
-        diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path))
-    except Exception:
+    if is_sort_local:
+        sortformer_location = Path(sortformer_path)
+        if sortformer_location.is_file() and sortformer_location.suffix == ".nemo":
+            sortformer_checkpoint = sortformer_location
+        elif sortformer_location.is_dir():
+            checkpoints = sorted(sortformer_location.glob("*.nemo"))
+            sortformer_checkpoint = checkpoints[0] if checkpoints else None
+        else:
+            sortformer_checkpoint = None
+        if sortformer_checkpoint is None:
+            logger.error("No found model Sortformer on path: %s", sortformer_path)
+            raise FileNotFoundError(f"No found model Sortformer on path: {sortformer_path}")
+        logger.info(" * Restoring local Sortformer checkpoint: %s", sortformer_checkpoint)
+        diar_model = SortformerEncLabelModel.restore_from(
+            str(sortformer_checkpoint), map_location=device
+        )
+    elif is_offline_mode():
+        logger.error("No found model Sortformer on path: %s", sortformer_path)
+        raise FileNotFoundError(f"No found model Sortformer on path: {sortformer_path}")
+    else:
         diar_model = SortformerEncLabelModel.from_pretrained(str(sortformer_path))
     diar_model.eval()
 

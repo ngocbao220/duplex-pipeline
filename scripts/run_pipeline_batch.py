@@ -243,7 +243,11 @@ def _check_model_status(name: str, raw_id: str | None, env_var: str | None = Non
     if not raw_id and not env_var:
         return ("(none)", "NOT CONFIGURED", False)
     
-    resolved, is_local = resolve_local_model_path(raw_id, env_var=env_var, default_subpath=default_sub)
+    try:
+        resolved, is_local = resolve_local_model_path(raw_id, env_var=env_var, default_subpath=default_sub)
+    except FileNotFoundError:
+        configured = os.environ.get(env_var, "") if env_var else ""
+        return (configured or default_sub or str(raw_id), "NOT FOUND (Offline mode requires local files)", False)
     if not resolved:
         return ("(none)", "NOT CONFIGURED", False)
     

@@ -95,7 +95,7 @@ def test_duplexchat_worker_returns_a_conversation_collection(monkeypatch, tmp_pa
     assert json.loads((tmp_path / "output" / "config.json").read_text()) == {"num_steps": 12}
 
 
-def test_failed_sample_emits_one_concise_console_error_and_persists_traceback(tmp_path, capsys):
+def test_failed_sample_emits_one_concise_console_error_and_persists_traceback(tmp_path, capsys, caplog):
     mixture = _wav(tmp_path / "mixture.wav")
 
     def failing_adapter(source, output, config):
@@ -103,7 +103,7 @@ def test_failed_sample_emits_one_concise_console_error_and_persists_traceback(tm
 
     result = run_sample("sommelier", {"key": "sample", "mixture": str(mixture)}, tmp_path / "output", {}, "code", failing_adapter)
 
-    captured = capsys.readouterr().out
+    captured = capsys.readouterr().out + "\n".join(caplog.messages)
     assert result["status"] == "failed"
     assert "FileNotFoundError: checkpoint missing" in result["traceback"]
     assert "Sample sample failed: FileNotFoundError: checkpoint missing" in captured

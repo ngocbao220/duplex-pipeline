@@ -32,10 +32,13 @@ def _write_dialoguesidon_bundle(model_dir, *, corrupt_ssl: bool = False) -> None
 
 
 def test_enforce_offline_mode(monkeypatch):
-    monkeypatch.setenv("MODE", "sever")
-    enforce_offline_mode()
-    assert os.environ.get("HF_HUB_OFFLINE") == "1"
-    assert os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+    with monkeypatch.context() as isolated_env:
+        isolated_env.setenv("MODE", "sever")
+        for variable in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
+            isolated_env.delenv(variable, raising=False)
+        enforce_offline_mode()
+        assert os.environ.get("HF_HUB_OFFLINE") == "1"
+        assert os.environ.get("TRANSFORMERS_OFFLINE") == "1"
 
 
 def test_resolve_local_model_path_existing_dir(tmp_path):
@@ -189,12 +192,15 @@ def test_offline_silero_missing_local_model_never_calls_torch_hub(monkeypatch, t
     import torch
     from core.model_utils import load_local_silero_vad
 
-    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
-    monkeypatch.setenv("SILERO_VAD_MODEL_PATH", str(tmp_path / "missing-silero"))
-    monkeypatch.setattr(torch.hub, "load", lambda *_args, **_kwargs: pytest.fail("Torch Hub must not run offline"))
+    with monkeypatch.context() as isolated_env:
+        for variable in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
+            isolated_env.delenv(variable, raising=False)
+        isolated_env.setenv("HF_HUB_OFFLINE", "1")
+        isolated_env.setenv("SILERO_VAD_MODEL_PATH", str(tmp_path / "missing-silero"))
+        isolated_env.setattr(torch.hub, "load", lambda *_args, **_kwargs: pytest.fail("Torch Hub must not run offline"))
 
-    with pytest.raises(FileNotFoundError, match="No found model snakers4/silero-vad"):
-        load_local_silero_vad()
+        with pytest.raises(FileNotFoundError, match="No found model snakers4/silero-vad"):
+            load_local_silero_vad()
 
 
 def test_sommelier_offline_preflight_reports_every_missing_local_model(monkeypatch, tmp_path, capsys, caplog):
@@ -244,3 +250,13 @@ def test_sommelier_run_stops_before_vendor_subprocess_when_offline_models_are_mi
         runner.run(source, output, {})
 
     assert not output.exists()
+
+
+def test_sommelier_local_sortformer_uses_nemo_restore_not_hub_pretrained():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "pipeline" / "sommelier" / "vendor" / "podcast_pipeline" / "main_original_ASR_MoE.py").read_text()
+    local_loader = source[source.index("# Load Sortformer model"):source.index("# Initialize Speaker Embedding model")]
+
+    assert "SortformerEncLabelModel.restore_from" in local_loader
+    assert "if is_sort_local:" in local_loader
+    assert "No found model Sortformer on path:" in local_loader
