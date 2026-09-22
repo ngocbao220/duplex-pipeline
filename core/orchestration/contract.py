@@ -132,6 +132,11 @@ def reusable(pipeline: str, output: Path, identity: str, source: Path) -> dict |
             validate_duplexchat_stereo_files(stereo_files)
             if result["stereo_sha256"] != stereo_files_sha256(stereo_files):
                 return None
+        elif pipeline == "sommelier":
+            stereo = output / result["stereo_path"]
+            validate_stereo(source, stereo)
+            if result['audio_sha256'] != sha256(stereo):
+                return None
         else:
             stereo = output / STEREO_FILENAME
             validate_stereo(source, stereo)
@@ -167,6 +172,12 @@ def run_sample(pipeline, sample, output, config, code, adapter, force=False) -> 
                       rtf=elapsed / duration if duration else None, metadata=metadata)
         if pipeline == "duplexchat":
             result["stereo_sha256"] = stereo_files_sha256(metadata["stereo_files"])
+        elif pipeline == "sommelier":
+            # Sommelier emits a numbered stereo_N.wav for dialogue inputs.
+            # Do not create audio.stereo.wav: it duplicates the same audio and
+            # discards the dialogue index needed by downstream pairing.
+            result["stereo_path"] = stereo.name
+            result["audio_sha256"] = sha256(stereo)
         else:
             canonical = output / STEREO_FILENAME
             if stereo.resolve() != canonical.resolve():

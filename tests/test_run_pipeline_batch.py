@@ -38,6 +38,26 @@ def test_run_pipeline_batch_dry_run(tmp_path):
     assert "sample_1.wav" in res.stdout
 
 
+def test_sommelier_publish_keeps_one_numbered_stereo_without_copying_audio(tmp_path):
+    batch = _batch_module()
+    run_output = tmp_path / ".runs" / "dialogue_2"
+    collection_output = tmp_path / "sommelier" / "youtube_100"
+    run_output.mkdir(parents=True)
+    collection_output.mkdir(parents=True)
+    dialogue = tmp_path / "dialogue_2.wav"
+    dialogue.touch()
+    generated = run_output / "stereo_2.wav"
+    generated.write_bytes(b"stereo")
+    (collection_output / "audio.stereo.wav").write_bytes(b"legacy duplicate")
+
+    published = batch._publish_sommelier_stereo(run_output, collection_output, dialogue)
+
+    assert published == collection_output / "stereo_2.wav"
+    assert published.read_bytes() == b"stereo"
+    assert published.stat().st_ino == generated.stat().st_ino
+    assert not (collection_output / "audio.stereo.wav").exists()
+
+
 def test_batch_timing_aggregates_steps_and_records_audio_speed(monkeypatch, tmp_path):
     batch = _batch_module()
     raw_dir = tmp_path / "raw"

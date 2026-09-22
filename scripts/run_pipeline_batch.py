@@ -68,6 +68,27 @@ def _duplexchat_complete(dialogue_dir: Path, output: Path) -> bool:
     return True
 
 
+def _publish_sommelier_stereo(run_output: Path, collection_output: Path, dialogue: Path) -> Path:
+    """Expose one dialogue result without sharing its resumable run directory."""
+    match = re.fullmatch(r"dialogue_(\d+)\.wav", dialogue.name)
+    if match is None:
+        raise ValueError(f"Sommelier dialogue input must be named dialogue_N.wav: {dialogue}")
+    source = run_output / f"stereo_{match.group(1)}.wav"
+    if not source.is_file() or source.stat().st_size == 0:
+        raise FileNotFoundError(f"Sommelier completed without numbered stereo output: {source}")
+    target = collection_output / source.name
+    # Legacy Sommelier runs wrote this unnumbered duplicate into the same
+    # collection folder.  A successful numbered publish supersedes it.
+    legacy = collection_output / "audio.stereo.wav"
+    if legacy.is_file():
+        legacy.unlink()
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    temporary.unlink(missing_ok=True)
+    os.link(source, temporary)
+    os.replace(temporary, target)
+    return target
+
+
 def _cholimex_complete(output: Path, conversation_idx: int) -> bool:
     stereo = output / f"cholimex_stereo_{conversation_idx}.wav"
     return stereo.is_file() and stereo.stat().st_size > 0
@@ -757,10 +778,11 @@ def run_batch():
                         continue
                     print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
                     for d_idx, dwav in enumerate(dialogue_files, start=1):
+                        run_out = sub_out / ".runs" / dwav.stem
                         cmd = [
                             sys.executable, "-m", "sommelier", "single",
                             "--input", str(dwav),
-                            "--output-dir", str(sub_out)
+                            "--output-dir", str(run_out)
                         ]
                         print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
                         print("    Command:", " ".join(cmd))
@@ -790,13 +812,16 @@ def run_batch():
                         print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} ({len(dialogue_files)} dialogues) -> {sub_out.name}")
                         sub_timings = []
                         for d_idx, dwav in enumerate(dialogue_files, start=1):
+                            run_out = sub_out / ".runs" / dwav.stem
                             cmd = [
                                 sys.executable, "-m", "sommelier", "single",
                                 "--input", str(dwav),
-                                "--output-dir", str(sub_out)
+                                "--output-dir", str(run_out)
                             ]
                             print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
                             timing = _timed_subprocess(cmd, dwav, sub_out, worker_env)
+                            if timing["exit_code"] == 0:
+                                _publish_sommelier_stereo(run_out, sub_out, dwav)
                             sub_timings.append(timing)
                             if timing["exit_code"] != 0:
                                 print(f"Error processing {dwav.name} (exit code {timing['exit_code']})")
@@ -819,7 +844,7 @@ def run_batch():
             print(f"=== Running Sommelier on {len(dialogue_files)} files from {input_dir} (GPU {args.gpu}, workers={args.workers}) ===")
             if args.dry_run:
                 for idx, wav in enumerate(dialogue_files, start=1):
-                    sub_out = output_dir / wav.stem
+                    sub_out = output_dir / ".runs" / wav.stem
                     cmd = [
                         sys.executable, "-m", "sommelier", "single",
                         "--input", str(wav),
@@ -830,7 +855,7 @@ def run_batch():
             else:
                 def _process_sommelier_single(item):
                     idx, wav = item
-                    sub_out = output_dir / wav.stem
+                    sub_out = output_dir / ".runs" / wav.stem
                     sub_out.mkdir(parents=True, exist_ok=True)
                     cmd = [
                         sys.executable, "-m", "sommelier", "single",
@@ -839,6 +864,8 @@ def run_batch():
                     ]
                     print(f"[{idx}/{len(dialogue_files)}] {wav.name} -> {sub_out.name}")
                     timing = _timed_subprocess(cmd, wav, sub_out, env)
+                    if timing["exit_code"] == 0:
+                        _publish_sommelier_stereo(sub_out, output_dir, wav)
                     if timing["exit_code"] != 0:
                         print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
                     return timing
@@ -851,6 +878,8 @@ def run_batch():
         pairs = []
         missing_mixtures = []
         for stereo in sorted(input_dir.rglob("stereo_*.wav")):
+            if ".runs" in stereo.relative_to(input_dir).parts:
+                continue
             match = re.fullmatch(r"stereo_(\d+)\.wav", stereo.name)
             if match is None:
                 continue

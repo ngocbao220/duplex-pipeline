@@ -124,6 +124,8 @@ def test_sommelier_contract_resumes_a_verified_complete_output(tmp_path):
     )
 
     assert first["status"] == "complete"
+    assert first["stereo_path"] == "stereo_1.wav"
+    assert not (output / "audio.stereo.wav").exists()
     assert resumed["status"] == "complete"
     assert resumed["resumed"] is True
 
