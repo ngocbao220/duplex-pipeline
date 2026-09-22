@@ -260,3 +260,11 @@ def test_sommelier_local_sortformer_uses_nemo_restore_not_hub_pretrained():
     assert "SortformerEncLabelModel.restore_from" in local_loader
     assert "if is_sort_local:" in local_loader
     assert "No found model Sortformer on path:" in local_loader
+
+
+def test_sommelier_local_speechbrain_forces_speechbrain_local_fetch_source():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "pipeline" / "sommelier" / "vendor" / "podcast_pipeline" / "main_original_ASR_MoE.py").read_text()
+    local_loader = source[source.index("# Fallback to local SpeechBrain"):source.index("# Initialize SepReformer separator")]
+
+    assert "FetchSource(FetchFrom.LOCAL" in local_loader

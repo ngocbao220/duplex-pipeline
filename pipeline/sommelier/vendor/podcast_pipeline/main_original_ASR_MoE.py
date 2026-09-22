@@ -3396,6 +3396,7 @@ if __name__ == "__main__":
             sb_path = None
             try:
                 from speechbrain.inference.speaker import EncoderClassifier
+                from speechbrain.utils.fetching import FetchFrom, FetchSource
                 sb_path, is_sb_local = resolve_local_model_path(
                     "speechbrain/spkrec-ecapa-voxceleb",
                     env_var="SPEECHBRAIN_MODEL_PATH",
@@ -3407,8 +3408,15 @@ if __name__ == "__main__":
                         required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
                         model_name_hint="SpeechBrain ECAPA",
                     )
+                if is_sb_local:
+                    # Force SpeechBrain's fetch layer to use local paths.  Passing
+                    # only a string leaves its source heuristic free to treat the
+                    # directory as a Hugging Face repository ID.
+                    sb_source = FetchSource(FetchFrom.LOCAL, str(Path(sb_path).resolve()))
+                else:
+                    sb_source = str(sb_path)
                 sb_classifier = EncoderClassifier.from_hparams(
-                    source=str(sb_path),
+                    source=sb_source,
                     run_opts={"device": str(device)},
                     savedir=str(sb_path) if is_sb_local else None
                 )
