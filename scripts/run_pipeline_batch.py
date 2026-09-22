@@ -305,7 +305,11 @@ def _log_preflight_info(args, input_dir: Path, output_dir: Path) -> None:
         models_to_check.append(("SepReformer Checkpoint", sepreformer_ckpt, "SEPREFORMER", None, None))
         sort_model = os.environ.get("SORTFORMER_MODEL_PATH") or "nvidia/diar_streaming_sortformer_4spk-v2.1"
         models_to_check.append(("Sortformer Diarization", sort_model, "SORTFORMER_MODEL_PATH", "diar_streaming_sortformer_4spk-v2.1", None))
-        models_to_check.append(("Speaker Embedding", "speechbrain/spkrec-ecapa-voxceleb", "SPEECHBRAIN_MODEL_PATH", "spkrec-ecapa-voxceleb", None))
+        models_to_check.append((
+            "Speaker Embedding", "speechbrain/spkrec-ecapa-voxceleb", "SPEECHBRAIN_MODEL_PATH",
+            "spkrec-ecapa-voxceleb",
+            ["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
+        ))
         hf_token_set = bool(os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN"))
         token_status = "CONFIGURED" if hf_token_set else "OPTIONAL (Local models used in offline mode)"
         print(f"  ├── Hugging Face Token          : {token_status}")

@@ -277,3 +277,18 @@ def test_resume_helpers_only_accept_complete_phase_artifacts(tmp_path):
     assert not batch._cholimex_complete(cholimex_out, 1)
     (cholimex_out / "cholimex_stereo_1.wav").write_bytes(b"stereo")
     assert batch._cholimex_complete(cholimex_out, 1)
+
+
+def test_speechbrain_preflight_requires_the_complete_local_bundle(monkeypatch, tmp_path):
+    batch = _batch_module()
+    model_dir = tmp_path / "spker"
+    model_dir.mkdir()
+    monkeypatch.setenv("SPEECHBRAIN_MODEL_PATH", str(model_dir))
+
+    _path, status, valid = batch._check_model_status(
+        "Speaker Embedding", "speechbrain/spkrec-ecapa-voxceleb", "SPEECHBRAIN_MODEL_PATH",
+        "spkrec-ecapa-voxceleb", ["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
+    )
+
+    assert valid is False
+    assert "INCOMPLETE" in status
