@@ -268,3 +268,5 @@ def test_sommelier_local_speechbrain_forces_speechbrain_local_fetch_source():
     local_loader = source[source.index("# Fallback to local SpeechBrain"):source.index("# Initialize SepReformer separator")]
 
     assert "FetchSource(FetchFrom.LOCAL" in local_loader
+    assert "SpeechBrain ECAPA local bundle validated:" in local_loader
+    assert "Failed to load local SpeechBrain ECAPA on path:" in local_loader

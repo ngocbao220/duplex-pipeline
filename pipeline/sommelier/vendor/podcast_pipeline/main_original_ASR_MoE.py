@@ -3408,6 +3408,7 @@ if __name__ == "__main__":
                         required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
                         model_name_hint="SpeechBrain ECAPA",
                     )
+                    logger.info(" * SpeechBrain ECAPA local bundle validated: %s", sb_path)
                 if is_sb_local:
                     # Force SpeechBrain's fetch layer to use local paths.  Passing
                     # only a string leaves its source heuristic free to treat the
@@ -3415,6 +3416,7 @@ if __name__ == "__main__":
                     sb_source = FetchSource(FetchFrom.LOCAL, str(Path(sb_path).resolve()))
                 else:
                     sb_source = str(sb_path)
+                logger.info(" * Loading local SpeechBrain ECAPA from: %s", sb_path)
                 sb_classifier = EncoderClassifier.from_hparams(
                     source=sb_source,
                     run_opts={"device": str(device)},
@@ -3433,7 +3435,11 @@ if __name__ == "__main__":
                 logger.info(" * Loaded local SpeechBrain ECAPA-TDNN as embedding model for SepReformer")
             except Exception as sb_err:
                 if is_offline_mode():
-                    logger.error("No found model SpeechBrain ECAPA on path: %s (%s)", sb_path or os.environ.get("SPEECHBRAIN_MODEL_PATH", ""), sb_err)
+                    path = sb_path or os.environ.get("SPEECHBRAIN_MODEL_PATH", "")
+                    if isinstance(sb_err, FileNotFoundError):
+                        logger.error("No found model SpeechBrain ECAPA on path: %s (%s)", path, sb_err)
+                    else:
+                        logger.error("Failed to load local SpeechBrain ECAPA on path: %s (%s)", path, sb_err)
                     raise
                 logger.warning(f" * Could not load SpeechBrain fallback embedding model: {sb_err}")
                 embedding_model = None
