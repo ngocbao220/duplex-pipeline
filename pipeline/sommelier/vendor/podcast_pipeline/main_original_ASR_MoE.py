@@ -3394,8 +3394,12 @@ if __name__ == "__main__":
         # Fallback to local SpeechBrain ECAPA-TDNN if pyannote embedding is not available
         if embedding_model is None:
             sb_path = None
+            speechbrain_bundle_validated = False
             try:
                 from speechbrain.inference.speaker import EncoderClassifier
+                from speechbrain.inference import interfaces as sb_interfaces
+                from speechbrain.utils import fetching as sb_fetching
+                from speechbrain.utils import parameter_transfer as sb_parameter_transfer
                 from speechbrain.utils.fetching import FetchFrom, FetchSource
                 sb_path, is_sb_local = resolve_local_model_path(
                     "speechbrain/spkrec-ecapa-voxceleb",
@@ -3408,6 +3412,7 @@ if __name__ == "__main__":
                         required_files=["hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt", "label_encoder.txt"],
                         model_name_hint="SpeechBrain ECAPA",
                     )
+                    speechbrain_bundle_validated = True
                     logger.info(" * SpeechBrain ECAPA local bundle validated: %s", sb_path)
                 if is_sb_local:
                     # Force SpeechBrain's fetch layer to use local paths.  Passing
@@ -3417,11 +3422,31 @@ if __name__ == "__main__":
                 else:
                     sb_source = str(sb_path)
                 logger.info(" * Loading local SpeechBrain ECAPA from: %s", sb_path)
-                sb_classifier = EncoderClassifier.from_hparams(
-                    source=sb_source,
-                    run_opts={"device": str(device)},
-                    savedir=str(sb_path) if is_sb_local else None
-                )
+                if is_sb_local:
+                    local_root = Path(sb_path).resolve()
+                    interface_fetch = sb_interfaces.fetch
+                    transfer_fetch = sb_parameter_transfer.fetch
+
+                    def _fetch_local(filename, _source, *fetch_args, **fetch_kwargs):
+                        return sb_fetching.fetch(
+                            filename, FetchSource(FetchFrom.LOCAL, str(local_root)),
+                            *fetch_args, **fetch_kwargs,
+                        )
+
+                    # The ECAPA YAML can contain repo IDs in pretrainer.paths.
+                    # Override both SpeechBrain call sites for this load only.
+                    sb_interfaces.fetch = _fetch_local
+                    sb_parameter_transfer.fetch = _fetch_local
+                try:
+                    sb_classifier = EncoderClassifier.from_hparams(
+                        source=sb_source,
+                        run_opts={"device": str(device)},
+                        savedir=str(sb_path) if is_sb_local else None
+                    )
+                finally:
+                    if is_sb_local:
+                        sb_interfaces.fetch = interface_fetch
+                        sb_parameter_transfer.fetch = transfer_fetch
 
                 class SpeechBrainEmbeddingWrapper(torch.nn.Module):
                     def __init__(self, classifier):
@@ -3436,7 +3461,7 @@ if __name__ == "__main__":
             except Exception as sb_err:
                 if is_offline_mode():
                     path = sb_path or os.environ.get("SPEECHBRAIN_MODEL_PATH", "")
-                    if isinstance(sb_err, FileNotFoundError):
+                    if not speechbrain_bundle_validated and isinstance(sb_err, FileNotFoundError):
                         logger.error("No found model SpeechBrain ECAPA on path: %s (%s)", path, sb_err)
                     else:
                         logger.error("Failed to load local SpeechBrain ECAPA on path: %s (%s)", path, sb_err)
