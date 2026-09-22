@@ -106,6 +106,13 @@ def _run_cmd(cmd: list[str], env: dict[str, str], dry_run: bool = False) -> int:
     return res.returncode
 
 
+def _batch_runtime_environment(env: dict[str, str]) -> dict[str, str]:
+    """Let the batch scheduler select physical GPUs from its explicit --gpu value."""
+    batch_env = dict(env)
+    batch_env.pop("CUDA_VISIBLE_DEVICES", None)
+    return batch_env
+
+
 def _append_resource_tuning_args(cmd: list[str], cfg: DictConfig) -> None:
     optimization = cfg.get("optimization", {})
     cmd.extend([
@@ -202,7 +209,7 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     if cfg.dry_run:
         cmd.append("--dry-run")
 
-    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
 
 
 def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
@@ -239,7 +246,7 @@ def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     if cfg.dry_run:
         cmd.append("--dry-run")
 
-    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
 
 
 def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
@@ -267,7 +274,7 @@ def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
     if cfg.dry_run:
         cmd.append("--dry-run")
 
-    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
 
 
 def step_cholimex(cfg: DictConfig, env: dict[str, str]) -> int:
@@ -295,7 +302,7 @@ def step_cholimex(cfg: DictConfig, env: dict[str, str]) -> int:
     _append_resource_tuning_args(cmd, cfg)
     if cfg.dry_run:
         cmd.append("--dry-run")
-    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
 
 
 def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:

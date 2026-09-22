@@ -197,7 +197,7 @@ def test_offline_silero_missing_local_model_never_calls_torch_hub(monkeypatch, t
         load_local_silero_vad()
 
 
-def test_sommelier_offline_preflight_reports_every_missing_local_model(monkeypatch, tmp_path, capsys):
+def test_sommelier_offline_preflight_reports_every_missing_local_model(monkeypatch, tmp_path, capsys, caplog):
     """Server mode must stop before the vendor subprocess can try a remote loader."""
     import sys
 
@@ -215,7 +215,7 @@ def test_sommelier_offline_preflight_reports_every_missing_local_model(monkeypat
     with pytest.raises(FileNotFoundError, match="Sommelier local model preflight failed"):
         validate_offline_models()
 
-    messages = capsys.readouterr().out
+    messages = capsys.readouterr().out + "\n".join(caplog.messages)
     for name, path in (
         ("Silero VAD", missing / "silero-vad"),
         ("Sortformer", missing / "sortformer"),

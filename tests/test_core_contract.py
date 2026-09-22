@@ -110,6 +110,24 @@ def test_failed_sample_emits_one_concise_console_error_and_persists_traceback(tm
     assert "Traceback" not in captured
 
 
+def test_sommelier_contract_resumes_a_verified_complete_output(tmp_path):
+    mixture = _wav(tmp_path / "mixture.wav")
+    output = tmp_path / "output"
+
+    def successful_adapter(_source, target, _config):
+        return _stereo_wav(target / "stereo_1.wav"), {}
+
+    first = run_sample("sommelier", {"key": "sample", "mixture": str(mixture)}, output, {}, "code", successful_adapter)
+    resumed = run_sample(
+        "sommelier", {"key": "sample", "mixture": str(mixture)}, output, {}, "code",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("completed Sommelier output must not rerun")),
+    )
+
+    assert first["status"] == "complete"
+    assert resumed["status"] == "complete"
+    assert resumed["resumed"] is True
+
+
 def test_worker_forces_headless_matplotlib_backend_over_notebook_backend(tmp_path, monkeypatch):
     monkeypatch.setenv("MPLBACKEND", "module://matplotlib_inline.backend_inline")
     log = tmp_path / "worker.log"

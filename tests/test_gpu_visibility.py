@@ -39,3 +39,10 @@ class RuntimeGpuVisibilityTests(unittest.TestCase):
         self.assertEqual(env["SPEECHBRAIN_MODEL_PATH"], "/models/spker")
         self.assertEqual(env["SEPREFORMER"], "/models/epoch.0180.pth")
         self.assertNotIn("CUDA_VISIBLE_DEVICES", env)
+
+    def test_batch_launcher_does_not_mask_the_requested_physical_gpu(self):
+        from run_pipeline import _batch_runtime_environment
+
+        env = _batch_runtime_environment({"CUDA_VISIBLE_DEVICES": "5"})
+
+        self.assertNotIn("CUDA_VISIBLE_DEVICES", env)

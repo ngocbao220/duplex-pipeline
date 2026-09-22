@@ -180,6 +180,14 @@ def test_sommelier_pipeline_declares_max_chunk_duration():
     assert somm_cfg.get("max_chunk_duration") == 300.0
 
 
+def test_sommelier_pre_asr_path_does_not_import_korean_g2p_at_module_load():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "pipeline" / "sommelier" / "vendor" / "podcast_pipeline" / "main_original_ASR_MoE.py").read_text()
+
+    assert "from g2pk import G2p" not in source.split('if __name__ == "__main__":')[0]
+    assert "if args.korean and not args.until_pre_asr:" in source
+
+
 def test_hydra_config_declares_cholimex_as_a_refinement_output():
     root = Path(__file__).resolve().parents[1]
     import yaml

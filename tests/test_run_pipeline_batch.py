@@ -233,3 +233,47 @@ def test_auto_tuning_calibrates_before_expanding_gpu_workers(monkeypatch):
     assert results == [1, 2, 3]
     assert calls[0] == (1, "0")
     assert plan["workers_per_gpu"] == {"0": 6}
+
+
+def test_explicit_gpu_identifier_is_not_wrapped_by_visible_gpu_count(monkeypatch, tmp_path):
+    batch = _batch_module()
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    (raw_dir / "source.wav").write_bytes(b"raw")
+    captured = []
+    monkeypatch.setattr(batch, "_audio_duration_seconds", lambda _path: 1.0)
+    monkeypatch.setattr(batch.subprocess, "run", lambda _cmd, **kwargs: captured.append(kwargs["env"]) or type("Result", (), {"returncode": 0})())
+    monkeypatch.setattr(batch, "_available_gpu_count", lambda: 8)
+    monkeypatch.setattr(sys, "argv", [
+        "run_pipeline_batch.py", "--step", "split_dialogue", "--input-dir", str(raw_dir),
+        "--output-dir", str(tmp_path / "out"), "--gpu", "5",
+    ])
+
+    batch.run_batch()
+
+    assert captured[0]["CUDA_VISIBLE_DEVICES"] == "5"
+
+
+def test_resume_helpers_only_accept_complete_phase_artifacts(tmp_path):
+    batch = _batch_module()
+    split_out = tmp_path / "split"
+    split_out.mkdir()
+    (split_out / "manifest.json").write_text(json.dumps({"dialogue_count": 1, "dialogues": [{"filename": "dialogue_1.wav"}]}))
+    assert not batch._split_dialogue_complete(split_out)
+    (split_out / "dialogue_1.wav").write_bytes(b"audio")
+    assert batch._split_dialogue_complete(split_out)
+
+    dialogue_dir = tmp_path / "dialogues"
+    dialogue_dir.mkdir()
+    (dialogue_dir / "dialogue_1.wav").write_bytes(b"audio")
+    duplex_out = tmp_path / "duplex"
+    duplex_out.mkdir()
+    assert not batch._duplexchat_complete(dialogue_dir, duplex_out)
+    (duplex_out / "stereo_1.wav").write_bytes(b"stereo")
+    assert batch._duplexchat_complete(dialogue_dir, duplex_out)
+
+    cholimex_out = tmp_path / "cholimex_1"
+    cholimex_out.mkdir()
+    assert not batch._cholimex_complete(cholimex_out, 1)
+    (cholimex_out / "cholimex_stereo_1.wav").write_bytes(b"stereo")
+    assert batch._cholimex_complete(cholimex_out, 1)

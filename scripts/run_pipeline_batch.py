@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from pathlib import Path
@@ -29,6 +30,67 @@ from core.resource_tuning import GpuMemorySampler, choose_workers_per_gpu, cpu_w
 from pipeline.duplexchat.src.duplexchat.model_options import DIARIZATION_MODELS, resolve_model_alias
 
 TIMING_REPORT_PATH = Path("outputs/pipeline_timing.json")
+
+
+def _available_gpu_count() -> int:
+    """Read the host-visible GPU count before assigning explicit physical IDs."""
+    try:
+        import torch
+        return torch.cuda.device_count()
+    except Exception:
+        return 0
+
+
+def _split_dialogue_complete(output: Path) -> bool:
+    """A split is reusable only after its manifest and every declared WAV exist."""
+    try:
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        dialogues = manifest["dialogues"]
+        if int(manifest["dialogue_count"]) != len(dialogues):
+            return False
+        return all((output / row["filename"]).is_file() and (output / row["filename"]).stat().st_size > 0 for row in dialogues)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _duplexchat_complete(dialogue_dir: Path, output: Path) -> bool:
+    """Require a stereo artifact for every dialogue emitted by the split phase."""
+    dialogues = sorted(dialogue_dir.glob("dialogue_*.wav"))
+    if not dialogues:
+        return _split_dialogue_complete(dialogue_dir)
+    for dialogue in dialogues:
+        match = re.fullmatch(r"dialogue_(\d+)\.wav", dialogue.name)
+        if match is None:
+            return False
+        stereo = output / f"stereo_{match.group(1)}.wav"
+        if not stereo.is_file() or stereo.stat().st_size == 0:
+            return False
+    return True
+
+
+def _cholimex_complete(output: Path, conversation_idx: int) -> bool:
+    stereo = output / f"cholimex_stereo_{conversation_idx}.wav"
+    return stereo.is_file() and stereo.stat().st_size > 0
+
+
+def _archive_incomplete_output(output: Path) -> None:
+    """Preserve failed partial artifacts before a phase is restarted."""
+    if not output.exists():
+        return
+    archive = output.parent / ".history" / uuid.uuid4().hex / output.name
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    output.rename(archive)
+    print(f"[RESUME] Archived incomplete output: {output} -> {archive}")
+
+
+def _resumed_timing(source: Path, output: Path) -> dict:
+    now = dt.datetime.now(dt.UTC).isoformat()
+    return {
+        "input": str(source.resolve()), "output": str(output.resolve()),
+        "started_at_utc": now, "ended_at_utc": now, "elapsed_seconds": 0.0,
+        "audio_seconds": _audio_duration_seconds(source), "real_time_factor": 0.0,
+        "audio_seconds_per_wall_second": None, "exit_code": 0, "status": "complete", "resumed": True,
+    }
 
 
 def _run_gpu_items(items, gpu_list: list[str], handler, *, resource_mode: str,
@@ -456,8 +518,7 @@ def run_batch():
     # Resolve GPU devices intelligently
     if gpu_str.lower() in ("auto", "all"):
         try:
-            import torch
-            n_gpus = torch.cuda.device_count()
+            n_gpus = _available_gpu_count()
             if n_gpus > 0:
                 gpu_list = [str(i) for i in range(n_gpus)]
             else:
@@ -467,16 +528,12 @@ def run_batch():
     else:
         raw_gpus = [g.strip() for g in gpu_str.split(",") if g.strip()]
         try:
-            import torch
-            n_gpus = torch.cuda.device_count()
+            n_gpus = _available_gpu_count()
             if n_gpus > 0:
-                valid_gpus = []
-                for g in raw_gpus:
-                    if g.isdigit():
-                        valid_gpus.append(str(int(g) % n_gpus))
-                    else:
-                        valid_gpus.append(g)
-                gpu_list = list(dict.fromkeys(valid_gpus))
+                invalid = [g for g in raw_gpus if g.isdigit() and int(g) >= n_gpus]
+                if invalid:
+                    parser.error(f"Requested GPU(s) {', '.join(invalid)} are outside host range 0..{n_gpus - 1}")
+                gpu_list = list(dict.fromkeys(raw_gpus))
             else:
                 gpu_list = raw_gpus
         except Exception:
@@ -543,6 +600,10 @@ def run_batch():
             def _process_one_wav(item, target_gpu):
                 idx, wav = item
                 sub_out = output_dir / wav.stem
+                if _split_dialogue_complete(sub_out):
+                    print(f"[RESUMED] {wav.name}: complete split output at {sub_out}")
+                    return _resumed_timing(wav, sub_out)
+                _archive_incomplete_output(sub_out)
                 worker_env = dict(env)
                 if target_gpu != "cpu":
                     worker_env["CUDA_VISIBLE_DEVICES"] = target_gpu
@@ -630,6 +691,11 @@ def run_batch():
                         "exit_code": 0,
                         "status": "skipped",
                     }
+
+                if _duplexchat_complete(sdir, sub_out):
+                    print(f"[RESUMED] {sdir.name}: complete DuplexChat output at {sub_out}")
+                    return _resumed_timing(sdir, sub_out)
+                _archive_incomplete_output(sub_out)
 
                 worker_env = dict(env)
                 if target_gpu != "cpu":
@@ -786,7 +852,7 @@ def run_batch():
                 missing_mixtures.append((stereo, mixture))
                 continue
             output = output_dir / relative_parent / f"cholimex_{match.group(1)}"
-            pairs.append((stereo, mixture, output))
+            pairs.append((stereo, mixture, output, int(match.group(1))))
 
         for stereo, mixture in missing_mixtures:
             print(f"[WARNING] Skipping {stereo.relative_to(input_dir)}: matching mixture is missing at {mixture}")
@@ -796,7 +862,7 @@ def run_batch():
 
         print(f"=== Running Cholimex refinement on {len(pairs)} DuplexChat clips from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
         if args.dry_run:
-            for idx, (stereo, mixture, output) in enumerate(pairs, start=1):
+            for idx, (stereo, mixture, output, _conversation_idx) in enumerate(pairs, start=1):
                 print(f"[{idx}/{len(pairs)}] {stereo.name} + {mixture.name} -> {output}")
                 print("  Command:", " ".join([
                     sys.executable, "-m", "cholimex", "collection", "--input", str(stereo),
@@ -806,18 +872,19 @@ def run_batch():
             gpu_queue = _create_gpu_queue()
 
             def _process_cholimex(item):
-                idx, (stereo, mixture, output) = item
+                idx, (stereo, mixture, output, conversation_idx) = item
                 target_gpu = gpu_queue.get()
                 try:
-                    if output.exists():
-                        print(f"[SKIPPED] {stereo.name}: output already exists at {output}")
+                    if _cholimex_complete(output, conversation_idx):
+                        print(f"[RESUMED] {stereo.name}: complete Cholimex output at {output}")
                         return {
                             "input": str(stereo.resolve()), "output": str(output.resolve()),
                             "started_at_utc": dt.datetime.now(dt.UTC).isoformat(),
                             "ended_at_utc": dt.datetime.now(dt.UTC).isoformat(), "elapsed_seconds": 0.0,
-                            "audio_seconds": _audio_duration_seconds(stereo), "real_time_factor": None,
-                            "audio_seconds_per_wall_second": None, "exit_code": 0, "status": "skipped",
+                            "audio_seconds": _audio_duration_seconds(stereo), "real_time_factor": 0.0,
+                            "audio_seconds_per_wall_second": None, "exit_code": 0, "status": "complete", "resumed": True,
                         }
+                    _archive_incomplete_output(output)
                     worker_env = dict(env)
                     if target_gpu != "cpu":
                         worker_env["CUDA_VISIBLE_DEVICES"] = target_gpu

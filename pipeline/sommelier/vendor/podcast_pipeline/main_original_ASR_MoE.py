@@ -100,7 +100,6 @@ from nemo.collections.asr.models import SortformerEncLabelModel
 import json
 import re
 import argparse
-from g2pk import G2p
 import collections
 import difflib
 from typing import List, Tuple, Dict
@@ -3201,6 +3200,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # G2PK imports NLTK resources.  Sommelier's pre-ASR profile never reaches
+    # Korean text post-processing, so do not import it in that execution path.
+    G2P = None
+    if args.korean and not args.until_pre_asr:
+        from g2pk import G2p
+        G2P = G2p()
+
     batch_size = args.batch_size
     cfg = load_cfg(args.config_path)
 
@@ -3308,9 +3314,6 @@ if __name__ == "__main__":
     logger.debug(" * Loading VAD Model")
     vad = silero_vad.SileroVAD(device=device)
     
-    # Initialize G2P instance
-    G2P = G2p()
-
     # English segment detection pattern: word groups connected by consecutive alphabets, apostrophes, and spaces
     ENG_PATTERN = re.compile(r"[A-Za-z][A-Za-z']*(?: [A-Za-z][A-Za-z']*)*")
 
