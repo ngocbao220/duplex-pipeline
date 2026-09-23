@@ -31,12 +31,12 @@ def main() -> None:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     parser.add_argument("--env-config", type=Path, default=ROOT / "configs" / "env" / "sever.yaml", help="Hydra environment YAML providing strict local benchmark model paths")
     parser.add_argument("--dnsmos-model-dir", type=Path, default=None, help="Directory containing Microsoft's sig_bak_ovr.onnx and model_v8.onnx")
-    parser.add_argument("--workers", "-w", type=int, default=1, help="Benchmark CPU workers (must be 1)")
+    parser.add_argument("--workers", "-w", type=int, default=2, help="Concurrent benchmark files (default: 2; CPU remains pinned to one core on Linux)")
     parser.add_argument("--check-models", action="store_true", help="Check availability of all benchmark models and dependencies before running")
     parser.add_argument("--debug", action="store_true", help="Write separated channels and detailed event files")
     args = parser.parse_args()
-    if args.workers != 1:
-        parser.error("Stereo benchmark requires --workers 1 to stay within one CPU thread")
+    if args.workers < 1:
+        parser.error("Stereo benchmark requires --workers >= 1")
     configured_paths = apply_environment_config(args.env_config)
     dnsmos_model_dir = args.dnsmos_model_dir or Path(configured_paths["DNSMOS_MODEL_PATH"])
 

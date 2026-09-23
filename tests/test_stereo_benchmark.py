@@ -100,6 +100,32 @@ def test_dnsmos_scorer_is_reused_for_multiple_metric_calls(monkeypatch, tmp_path
     assert created == [tmp_path]
 
 
+def test_parallel_files_do_not_load_dnsmos_twice(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from time import sleep
+    import core.stereo_benchmark.models as models
+
+    created = []
+
+    class FakeScorer:
+        primary = None
+
+        def __init__(self, _model_dir):
+            sleep(0.05)
+            created.append(1)
+
+        def score(self, _audio, _sample_rate):
+            return {"status": "ok", "ovrl": 3.0}
+
+    models._dnsmos_scorer.cache_clear()
+    monkeypatch.setattr("core.stereo_benchmark.dnsmos.DNSMOSScorer", FakeScorer)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: models._dnsmos_metrics(np.ones(16), np.ones(16), tmp_path), range(2)))
+
+    assert len(created) == 1
+    assert all(result["left"]["status"] == "ok" for result in results)
+
+
 def test_dnsmos_reports_onnx_provider_used(monkeypatch, tmp_path):
     import core.stereo_benchmark.models as models
 
@@ -337,11 +363,34 @@ def test_dnsmos_limits_onnx_batch_without_dropping_windows(monkeypatch):
     assert batch_sizes == [16, 16, 5, 5]
 
 
-def test_corpus_rejects_multiple_cpu_workers(tmp_path):
+def test_corpus_benchmarks_two_files_concurrently_with_stable_results(monkeypatch, tmp_path):
+    from threading import Barrier
+    import core.stereo_benchmark.runner as runner
+
+    for name in ("a.wav", "b.wav"):
+        sf.write(tmp_path / name, np.zeros((160, 2)), 16000)
+    barrier = Barrier(2)
+
+    def fake_benchmark(audio_path, output_dir, *_args):
+        barrier.wait(timeout=2)
+        return {"path": str(audio_path)}, output_dir / "report.json"
+
+    monkeypatch.setattr(runner, "run_benchmark", fake_benchmark)
+    monkeypatch.setattr(runner, "summarize_reports", lambda reports: {"sample_count": len(reports)})
+    monkeypatch.setattr(runner, "render_tables", lambda _summary: "summary")
+    monkeypatch.setattr(runner, "flatten_report", lambda _report, source: {"source": source, "status": "ok"})
+
+    result, _ = runner.run_corpus_benchmark(tmp_path, tmp_path / "out", workers=2)
+
+    assert [sample["source"] for sample in result["samples"]] == ["a.wav", "b.wav"]
+    assert all(sample["status"] == "ok" for sample in result["samples"])
+
+
+def test_corpus_rejects_nonpositive_workers(tmp_path):
     from core.stereo_benchmark.runner import run_corpus_benchmark
 
-    with pytest.raises(ValueError, match="workers=1"):
-        run_corpus_benchmark(tmp_path, tmp_path / "out", workers=2)
+    with pytest.raises(ValueError, match="workers >= 1"):
+        run_corpus_benchmark(tmp_path, tmp_path / "out", workers=0)
 
 
 def test_corpus_discovery_recurses_over_supported_audio_files(tmp_path):

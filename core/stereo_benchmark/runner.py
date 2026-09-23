@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -140,11 +141,11 @@ def run_corpus_benchmark(
     device: str = "auto",
     debug: bool = False,
     dnsmos_model_dir: Path | None = Path("models/dnsmos"),
-    workers: int = 1,
+    workers: int = 2,
 ) -> tuple[dict, Path]:
     """Benchmark all audio candidates, retaining per-file failures instead of aborting a corpus."""
-    if workers != 1:
-        raise ValueError("Stereo benchmark requires workers=1 to stay within one CPU thread")
+    if workers < 1:
+        raise ValueError("Stereo benchmark requires workers >= 1")
     started = perf_counter()
     corpus_dir, output_dir = Path(corpus_dir), Path(output_dir)
     candidates = discover_corpus_audio(corpus_dir)
@@ -168,7 +169,11 @@ def run_corpus_benchmark(
             return None, sample_entry, row_entry
 
     indexed_candidates = list(enumerate(candidates))
-    results = [_benchmark_candidate(item) for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files")]
+    if workers > 1 and len(indexed_candidates) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(tqdm.tqdm(pool.map(_benchmark_candidate, indexed_candidates), total=len(candidates), desc="Benchmarking files"))
+    else:
+        results = [_benchmark_candidate(item) for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files")]
 
     for report, sample_entry, row_entry in results:
         if report is not None:

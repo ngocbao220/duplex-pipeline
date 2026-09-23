@@ -331,8 +331,8 @@ def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
         logger.info("Corpus directory %s does not exist. Skipping benchmark step.", corpus_dir)
         return 0
 
-    workers = 1  # Benchmark's total CPU budget is one worker, independent of pipeline worker settings.
-    logger.info("Stereo benchmark CPU budget: 1 worker on 1 CPU core")
+    workers = int(cfg.benchmark.workers)
+    logger.info("Stereo benchmark: %s concurrent files on one CPU core", workers)
     cmd = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "benchmark_stereo.py"),

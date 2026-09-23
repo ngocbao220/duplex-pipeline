@@ -18,6 +18,7 @@ SPEAKER_WINDOW_SAMPLES = SAMPLE_RATE * 3
 SPEAKER_BATCH_SIZE = 16
 _NISQA_MODEL_LOCK = Lock()
 _NISQA_MODELS: dict[tuple[str, str], object] = {}
+_MODEL_LOAD_LOCK = Lock()
 
 
 def unavailable(reason: str) -> dict:
@@ -193,7 +194,8 @@ def _dnsmos_scorer(model_dir: Path):
 
 def _dnsmos_metrics(left: np.ndarray, right: np.ndarray, model_dir: Path | None, runtime_info: dict | None = None) -> dict:
     try:
-        scorer = _dnsmos_scorer(Path(model_dir) if model_dir else Path("models/dnsmos"))
+        with _MODEL_LOAD_LOCK:
+            scorer = _dnsmos_scorer(Path(model_dir) if model_dir else Path("models/dnsmos"))
         if runtime_info is not None:
             runtime_info["dnsmos_providers"] = scorer.primary.get_providers() if scorer.primary is not None else []
         return _combine_channels(scorer.score(left, SAMPLE_RATE), scorer.score(right, SAMPLE_RATE))
@@ -227,7 +229,8 @@ def _squim_many(audios: tuple[np.ndarray, np.ndarray], device: str) -> tuple[dic
     try:
         import torch
 
-        model = _squim_model(device)
+        with _MODEL_LOAD_LOCK:
+            model = _squim_model(device)
         chunks: dict[int, list[tuple[int, object]]] = defaultdict(list)
         values = [[], []]
         for channel, audio in enumerate(audios):
@@ -366,7 +369,8 @@ def _embeddings_many(audios: tuple[np.ndarray, np.ndarray], device: str) -> tupl
             windows.append((channel, signal[start:start + SPEAKER_WINDOW_SAMPLES]))
     if not windows:
         return None, None
-    encoder = _speaker_encoder(device)
+    with _MODEL_LOAD_LOCK:
+        encoder = _speaker_encoder(device)
     values = [[], []]
     for start in range(0, len(windows), SPEAKER_BATCH_SIZE):
         batch_items = windows[start:start + SPEAKER_BATCH_SIZE]
