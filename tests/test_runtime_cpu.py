@@ -12,6 +12,9 @@ def test_enforce_single_cpu_thread_env_vars():
         "VECLIB_MAXIMUM_THREADS",
         "NUMEXPR_NUM_THREADS",
         "TORCH_NUM_THREADS",
+        "NUMBA_NUM_THREADS",
+        "OMP_THREAD_LIMIT",
+        "BLIS_NUM_THREADS",
     ):
         assert os.environ.get(env_var) == "1", f"{env_var} is not set to 1"
 

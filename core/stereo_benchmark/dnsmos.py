@@ -14,6 +14,7 @@ SAMPLE_RATE = 16000
 WINDOW_SEC = 9.01
 PRIMARY_MODEL = "sig_bak_ovr.onnx"
 P808_MODEL = "model_v8.onnx"
+ONNX_BATCH_SIZE = 16
 
 
 def resolve_dnsmos_dir(model_dir: Path | str | None) -> Path:
@@ -74,6 +75,8 @@ class DNSMOSScorer:
                 os.environ["ORT_DISABLE_TELEMETRY"] = "1"
                 opts = ort.SessionOptions()
                 opts.log_severity_level = 3
+                opts.intra_op_num_threads = 1
+                opts.inter_op_num_threads = 1
 
                 primary_path = str((self.model_dir / PRIMARY_MODEL).resolve())
                 p808_path = str((self.model_dir / P808_MODEL).resolve())
@@ -115,43 +118,28 @@ class DNSMOSScorer:
             # Compute full mel-spectrogram once for the entire signal (1000x faster than per-chunk STFT)
             full_mel = librosa.feature.melspectrogram(y=signal, sr=SAMPLE_RATE, n_fft=321, hop_length=160, n_mels=120)
             
-            chunks_arr = []
-            features_list = []
-            for i in range(num_hops):
-                audio_start = i * SAMPLE_RATE
-                audio_chunk = signal[audio_start : audio_start + window_samples]
-                if audio_chunk.size != window_samples:
-                    continue
-                chunks_arr.append(audio_chunk)
-                
-                # 900 mel frames per 9.0s chunk (100 frames per sec)
-                mel_slice = full_mel[:, i * 100 : i * 100 + 900]
-                if mel_slice.shape[1] == 900:
-                    db_mel = ((librosa.power_to_db(mel_slice, ref=np.max) + 40) / 40).T
-                    features_list.append(db_mel)
-            
-            if not chunks_arr or len(chunks_arr) != len(features_list):
-                return {"status": "unavailable", "reason": "DNSMOS produced no complete analysis window"}
-
-            chunks_arr = np.array(chunks_arr, dtype=np.float32)
-            features_arr = np.array(features_list, dtype=np.float32)
-            
-            # Batch inference for primary model
             primary_input_name = self.primary.get_inputs()[0].name
-            raw_primary = self.primary.run(None, {primary_input_name: chunks_arr})[0] # [N, 3]
-            
-            # Batch inference for p808 model
             p808_input_name = self.p808.get_inputs()[0].name
-            raw_p808 = self.p808.run(None, {p808_input_name: features_arr})[0] # [N, 1] or [N]
-            if raw_p808.ndim > 1:
-                raw_p808 = raw_p808.squeeze(-1)
-            
             scores = []
-            for i in range(len(chunks_arr)):
-                raw_sig, raw_bak, raw_ovrl = raw_primary[i]
-                p808_val = float(raw_p808[i])
-                sig, bak, ovrl = self._calibrate(raw_sig, raw_bak, raw_ovrl)
-                scores.append((sig, bak, ovrl, p808_val))
+            for batch_start in range(0, num_hops, ONNX_BATCH_SIZE):
+                chunks, features = [], []
+                for i in range(batch_start, min(batch_start + ONNX_BATCH_SIZE, num_hops)):
+                    audio_chunk = signal[i * SAMPLE_RATE : i * SAMPLE_RATE + window_samples]
+                    mel_slice = full_mel[:, i * 100 : i * 100 + 900]
+                    if audio_chunk.size != window_samples or mel_slice.shape[1] != 900:
+                        continue
+                    chunks.append(audio_chunk)
+                    features.append(((librosa.power_to_db(mel_slice, ref=np.max) + 40) / 40).T)
+                if not chunks:
+                    continue
+                raw_primary = self.primary.run(None, {primary_input_name: np.asarray(chunks, dtype=np.float32)})[0]
+                raw_p808 = self.p808.run(None, {p808_input_name: np.asarray(features, dtype=np.float32)})[0]
+                for (raw_sig, raw_bak, raw_ovrl), p808_val in zip(raw_primary, np.asarray(raw_p808).reshape(-1)):
+                    sig, bak, ovrl = self._calibrate(raw_sig, raw_bak, raw_ovrl)
+                    scores.append((sig, bak, ovrl, float(p808_val)))
+
+            if not scores:
+                return {"status": "unavailable", "reason": "DNSMOS produced no complete analysis window"}
                 
             mean = np.mean(np.asarray(scores), axis=0)
             return {

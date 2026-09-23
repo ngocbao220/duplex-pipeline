@@ -18,6 +18,9 @@ def enforce_single_cpu_thread() -> None:
         "VECLIB_MAXIMUM_THREADS",
         "NUMEXPR_NUM_THREADS",
         "TORCH_NUM_THREADS",
+        "NUMBA_NUM_THREADS",
+        "OMP_THREAD_LIMIT",
+        "BLIS_NUM_THREADS",
     ):
         os.environ[env_var] = "1"
 

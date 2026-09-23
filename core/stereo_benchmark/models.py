@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
+from time import perf_counter
 
 import numpy as np
 
@@ -14,6 +16,8 @@ SQUIM_WINDOW_SAMPLES = SAMPLE_RATE * 10
 SQUIM_BATCH_SIZE = 8
 SPEAKER_WINDOW_SAMPLES = SAMPLE_RATE * 3
 SPEAKER_BATCH_SIZE = 16
+_NISQA_MODEL_LOCK = Lock()
+_NISQA_MODELS: dict[tuple[str, str], object] = {}
 
 
 def unavailable(reason: str) -> dict:
@@ -35,18 +39,51 @@ def prepare_speech(audio: np.ndarray, sample_rate: int, mask: np.ndarray, frame_
     return ta_functional.resample(torch.from_numpy(speech).unsqueeze(0), sample_rate, SAMPLE_RATE).squeeze(0).numpy()
 
 
-def acoustic_metrics(left: np.ndarray, right: np.ndarray, device: str, dnsmos_model_dir: Path | None = None) -> dict:
+def acoustic_metrics(left: np.ndarray, right: np.ndarray, device: str, dnsmos_model_dir: Path | None = None, *, timings: dict | None = None, runtime_info: dict | None = None) -> dict:
     """Compute reference-free acoustic metrics from prepared 16 kHz speech."""
+    started = perf_counter()
     squim_left, squim_right = _squim_many((left, right), device)
+    squim_at = perf_counter()
+    dnsmos = _dnsmos_metrics(left, right, dnsmos_model_dir, runtime_info)
+    dnsmos_at = perf_counter()
+    nisqa = _nisqa_metrics(left, right, device)
+    if timings is not None:
+        timings.update(squim=squim_at - started, dnsmos=dnsmos_at - squim_at, nisqa=perf_counter() - dnsmos_at)
     return {
-        "dnsmos": _dnsmos_metrics(left, right, dnsmos_model_dir),
+        "dnsmos": dnsmos,
         "squim": _combine_channels(squim_left, squim_right),
-        "nisqa": _nisqa_metrics(left, right, device),
+        "nisqa": nisqa,
     }
 
 
 def _nisqa_metrics(left: np.ndarray, right: np.ndarray, device: str) -> dict:
-    return _combine_channels(_nisqa_one(left, device), _nisqa_one(right, device))
+    if not left.size or not right.size:
+        return _combine_channels(_nisqa_one(left, device), _nisqa_one(right, device))
+    if not _ensure_nisqa_installed():
+        failure = unavailable("NISQA unavailable: local benchmark environment is missing the 'nisqa' package; install its local wheel during environment provisioning")
+        return _combine_channels(failure, failure)
+    try:
+        import tempfile
+        import soundfile as sf
+
+        checkpoint = _nisqa_checkpoint_path()
+        with tempfile.TemporaryDirectory(prefix="nisqa-pair-") as directory:
+            folder = Path(directory)
+            for name, audio in (("left.wav", left), ("right.wav", right)):
+                path = folder / name
+                sf.write(path, audio, SAMPLE_RATE)
+                sf.info(path)
+            args = _nisqa_prediction_args(checkpoint, folder / "left.wav", device)
+            args.update(mode="predict_dir", data_dir=str(folder), tr_bs_val=2)
+            result = _predict_nisqa(args, device)
+            scores = {str(row["deg"]): float(row["mos_pred"]) for _, row in result.iterrows()}
+            return _combine_channels(
+                {"status": "ok", "nisqa_mos": scores["left.wav"]},
+                {"status": "ok", "nisqa_mos": scores["right.wav"]},
+            )
+    except Exception as error:
+        failure = unavailable(f"NISQA unavailable: {type(error).__name__}: {error}")
+        return _combine_channels(failure, failure)
 
 
 def _load_nisqa_model_class():
@@ -77,13 +114,30 @@ def _ensure_nisqa_installed() -> bool:
         return False
 
 
+def _predict_nisqa(args: dict, device: str):
+    """Keep one NISQA checkpoint resident per device; its dataset is mutable."""
+    key = (args["pretrained_model"], device)
+    with _NISQA_MODEL_LOCK:
+        model = _NISQA_MODELS.get(key)
+        try:
+            if model is None:
+                model = _load_nisqa_model_class()(args)
+                _NISQA_MODELS[key] = model
+            else:
+                model.args.update(args)
+                model._loadDatasets()
+            return model.predict()
+        except Exception:
+            _NISQA_MODELS.pop(key, None)
+            raise
+
+
 def _nisqa_one(audio: np.ndarray, device: str) -> dict:
     if not audio.size:
         return unavailable("Audio is empty for NISQA")
     if not _ensure_nisqa_installed():
         return unavailable("NISQA unavailable: local benchmark environment is missing the 'nisqa' package; install its local wheel during environment provisioning")
     try:
-        nisqaModel = _load_nisqa_model_class()
         import tempfile
         import soundfile as sf
 
@@ -95,17 +149,16 @@ def _nisqa_one(audio: np.ndarray, device: str) -> dict:
             audio_path = Path(directory) / "input.wav"
             sf.write(audio_path, audio, SAMPLE_RATE)
             sf.info(audio_path)  # Report a WAV write/read problem before NISQA.
-            model = nisqaModel(_nisqa_prediction_args(nisqa_target, audio_path))
-            res = model.predict()
+            res = _predict_nisqa(_nisqa_prediction_args(nisqa_target, audio_path, device), device)
             score = float(res["mos_pred"].iloc[0]) if hasattr(res, "iloc") else float(res["mos_pred"])
             return {"status": "ok", "nisqa_mos": score}
     except Exception as error:
         return unavailable(f"NISQA unavailable: {type(error).__name__}: {error}")
 
 
-def _nisqa_prediction_args(checkpoint: Path, audio_path: Path) -> dict:
+def _nisqa_prediction_args(checkpoint: Path, audio_path: Path, device: str = "auto") -> dict:
     """Supply runtime-only defaults absent from older local NISQA checkpoints."""
-    return {
+    args = {
         "mode": "predict_file",
         "deg": str(audio_path),
         "pretrained_model": str(checkpoint),
@@ -117,6 +170,9 @@ def _nisqa_prediction_args(checkpoint: Path, audio_path: Path) -> dict:
         "output_dir": None,
         "name": "nisqa_local",
     }
+    if device in ("cpu", "cuda"):
+        args["tr_device"] = device
+    return args
 
 
 def _nisqa_checkpoint_path() -> Path:
@@ -135,9 +191,11 @@ def _dnsmos_scorer(model_dir: Path):
     return DNSMOSScorer(model_dir)
 
 
-def _dnsmos_metrics(left: np.ndarray, right: np.ndarray, model_dir: Path | None) -> dict:
+def _dnsmos_metrics(left: np.ndarray, right: np.ndarray, model_dir: Path | None, runtime_info: dict | None = None) -> dict:
     try:
         scorer = _dnsmos_scorer(Path(model_dir) if model_dir else Path("models/dnsmos"))
+        if runtime_info is not None:
+            runtime_info["dnsmos_providers"] = scorer.primary.get_providers() if scorer.primary is not None else []
         return _combine_channels(scorer.score(left, SAMPLE_RATE), scorer.score(right, SAMPLE_RATE))
     except Exception as error:
         return unavailable(f"DNSMOS unavailable: {type(error).__name__}: {error}")

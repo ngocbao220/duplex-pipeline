@@ -100,6 +100,130 @@ def test_dnsmos_scorer_is_reused_for_multiple_metric_calls(monkeypatch, tmp_path
     assert created == [tmp_path]
 
 
+def test_dnsmos_reports_onnx_provider_used(monkeypatch, tmp_path):
+    import core.stereo_benchmark.models as models
+
+    class FakeSession:
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+    class FakeScorer:
+        primary = FakeSession()
+
+        def score(self, _audio, _rate):
+            return {"status": "ok", "ovrl": 3.0}
+
+    monkeypatch.setattr(models, "_dnsmos_scorer", lambda _path: FakeScorer())
+    runtime_info = {}
+    models._dnsmos_metrics(np.ones(16000), np.ones(16000), tmp_path, runtime_info)
+
+    assert runtime_info["dnsmos_providers"] == ["CPUExecutionProvider"]
+
+
+def test_dnsmos_limits_native_onnx_threads(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    for name in ("sig_bak_ovr.onnx", "model_v8.onnx"):
+        (tmp_path / name).touch()
+    configured = []
+
+    class FakeOptions:
+        pass
+
+    def fake_session(_path, sess_options, providers):
+        configured.append((sess_options.intra_op_num_threads, sess_options.inter_op_num_threads))
+        return SimpleNamespace(get_providers=lambda: providers)
+
+    fake_ort = SimpleNamespace(SessionOptions=FakeOptions, InferenceSession=fake_session, get_available_providers=lambda: ["CPUExecutionProvider"])
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    monkeypatch.setattr("core.stereo_benchmark.dnsmos.ensure_runtime_compat", lambda: None)
+    scorer = DNSMOSScorer(tmp_path)
+
+    assert scorer.error is None
+    assert configured == [(1, 1), (1, 1)]
+
+
+def test_acoustic_metrics_records_each_model_time(monkeypatch):
+    import core.stereo_benchmark.models as models
+
+    monkeypatch.setattr(models, "_squim_many", lambda *_args: ({"status": "ok"}, {"status": "ok"}))
+    monkeypatch.setattr(models, "_dnsmos_metrics", lambda *_args: {"status": "ok"})
+    monkeypatch.setattr(models, "_nisqa_metrics", lambda *_args: {"status": "ok"})
+    timings = {}
+    models.acoustic_metrics(np.ones(16), np.ones(16), "cpu", timings=timings)
+
+    assert set(timings) == {"squim", "dnsmos", "nisqa"}
+    assert all(value >= 0 for value in timings.values())
+
+
+def test_nisqa_scores_both_channels_with_one_model_load(monkeypatch, tmp_path):
+    import pandas as pd
+    import core.stereo_benchmark.models as models
+
+    checkpoint = tmp_path / "nisqa.tar"
+    checkpoint.touch()
+    monkeypatch.setenv("NISQA_MODEL_PATH", str(checkpoint))
+    monkeypatch.setattr(models, "_ensure_nisqa_installed", lambda: True)
+    calls = []
+
+    class FakeNisqaModel:
+        def __init__(self, args):
+            calls.append(args.copy())
+            self.args = args
+
+        def _loadDatasets(self):
+            pass
+
+        def predict(self):
+            return pd.DataFrame({"deg": ["right.wav", "left.wav"], "mos_pred": [3.0, 4.0]})
+
+    monkeypatch.setattr(models, "_load_nisqa_model_class", lambda: FakeNisqaModel)
+    result = models._nisqa_metrics(np.ones(16000), np.ones(16000), "cpu")
+
+    assert len(calls) == 1
+    assert calls[0]["mode"] == "predict_dir"
+    assert calls[0]["tr_bs_val"] == 2
+    assert calls[0]["tr_device"] == "cpu"
+    assert result["left"]["nisqa_mos"] == 4.0
+    assert result["right"]["nisqa_mos"] == 3.0
+
+    second = models._nisqa_metrics(np.ones(16000), np.ones(16000), "cpu")
+    assert len(calls) == 1
+    assert second == result
+
+
+def test_nisqa_reuses_preflight_model_for_stereo_file(monkeypatch, tmp_path):
+    import pandas as pd
+    import core.stereo_benchmark.models as models
+
+    checkpoint = tmp_path / "nisqa.tar"
+    checkpoint.touch()
+    monkeypatch.setenv("NISQA_MODEL_PATH", str(checkpoint))
+    monkeypatch.setattr(models, "_ensure_nisqa_installed", lambda: True)
+    loaded = []
+    reloaded = []
+
+    class FakeNisqaModel:
+        def __init__(self, args):
+            self.args = args
+            loaded.append(args.copy())
+
+        def _loadDatasets(self):
+            reloaded.append(self.args["mode"])
+
+        def predict(self):
+            if self.args["mode"] == "predict_file":
+                return pd.DataFrame({"deg": ["input.wav"], "mos_pred": [3.5]})
+            return pd.DataFrame({"deg": ["left.wav", "right.wav"], "mos_pred": [3.5, 3.5]})
+
+    monkeypatch.setattr(models, "_load_nisqa_model_class", lambda: FakeNisqaModel)
+    assert models._nisqa_one(np.ones(16000), "cpu")["status"] == "ok"
+    assert models._nisqa_metrics(np.ones(16000), np.ones(16000), "cpu")["left"]["status"] == "ok"
+    assert len(loaded) == 1
+    assert reloaded == ["predict_dir"]
+
+
 def test_squim_batches_equal_length_windows(monkeypatch):
     import torch
     import core.stereo_benchmark.models as models
@@ -151,7 +275,7 @@ def test_benchmark_reuses_prepared_speech_for_acoustic_and_speaker_metrics(monke
         prepared.append(value)
         return value
 
-    def fake_acoustic(left, right, *_args):
+    def fake_acoustic(left, right, *_args, **_kwargs):
         calls.append((left, right))
         return {"dnsmos": {"left": {"status": "unavailable"}}, "squim": {"left": {"status": "unavailable"}}}
 
@@ -176,6 +300,48 @@ def test_dnsmos_reports_missing_model_assets_without_crashing(tmp_path):
 
     assert result["status"] == "unavailable"
     assert "sig_bak_ovr.onnx" in result["reason"]
+
+
+def test_dnsmos_limits_onnx_batch_without_dropping_windows(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    fake_librosa = SimpleNamespace(
+        feature=SimpleNamespace(melspectrogram=lambda **_kwargs: np.zeros((120, 3000), dtype=np.float32)),
+        power_to_db=lambda mel, **_kwargs: mel,
+    )
+    monkeypatch.setitem(sys.modules, "librosa", fake_librosa)
+    scorer = object.__new__(DNSMOSScorer)
+    scorer.error = None
+    batch_sizes = []
+
+    class FakeSession:
+        def __init__(self, width):
+            self.width = width
+
+        def get_inputs(self):
+            return [type("Input", (), {"name": "audio"})()]
+
+        def run(self, _outputs, feeds):
+            batch_size = feeds["audio"].shape[0]
+            batch_sizes.append(batch_size)
+            return [np.ones((batch_size, self.width), dtype=np.float32)]
+
+    scorer.primary = FakeSession(3)
+    scorer.p808 = FakeSession(1)
+    result = scorer.score(np.ones(16000 * 30, dtype=np.float32), 16000)
+
+    assert result["status"] == "ok", result
+    assert result["window_count"] == 21
+    assert max(batch_sizes) <= 16
+    assert batch_sizes == [16, 16, 5, 5]
+
+
+def test_corpus_rejects_multiple_cpu_workers(tmp_path):
+    from core.stereo_benchmark.runner import run_corpus_benchmark
+
+    with pytest.raises(ValueError, match="workers=1"):
+        run_corpus_benchmark(tmp_path, tmp_path / "out", workers=2)
 
 
 def test_corpus_discovery_recurses_over_supported_audio_files(tmp_path):

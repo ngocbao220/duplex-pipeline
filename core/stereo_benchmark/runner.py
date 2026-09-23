@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 
+from core.runtime_cpu import enforce_single_cpu_thread  # Apply limits before NumPy/Torch imports.
 import numpy as np
 import soundfile as sf
 import torch
@@ -17,12 +17,6 @@ try:
     import torchaudio
 except (ImportError, OSError):
     torchaudio = None
-
-try:
-    from core.runtime_cpu import enforce_single_cpu_thread
-    enforce_single_cpu_thread()
-except ImportError:
-    pass
 
 from .activity import ActivityConfig, activity_summary, config_dict, energy_vad, mask_segments
 from .audio import load_stereo
@@ -68,7 +62,9 @@ def run_benchmark(audio_path: Path, output_dir: Path, device: str = "auto", debu
     left_speech = prepare_speech(audio.left, audio.sample_rate, left_mask, frame_sec)
     right_speech = prepare_speech(audio.right, audio.sample_rate, right_mask, frame_sec)
     prepared_at = perf_counter()
-    acoustic = acoustic_metrics(left_speech, right_speech, selected_device, dnsmos_model_dir)
+    metric_seconds = {}
+    model_runtime = {}
+    acoustic = acoustic_metrics(left_speech, right_speech, selected_device, dnsmos_model_dir, timings=metric_seconds, runtime_info=model_runtime)
     acoustic_at = perf_counter()
     identity = speaker_metrics(left_speech, right_speech, selected_device)
     identity_at = perf_counter()
@@ -96,6 +92,8 @@ def run_benchmark(audio_path: Path, output_dir: Path, device: str = "auto", debu
                 "speaker_identity": identity_at - acoustic_at,
                 "diagnostics": diagnostics_at - identity_at,
             },
+            "metric_seconds": metric_seconds,
+            "model_runtime": model_runtime,
             "total_seconds": diagnostics_at - started,
         },
         "versions": {"benchmark": "0.1.0", "python": platform.python_version(), "torch": torch.__version__, "torchaudio": getattr(torchaudio, "__version__", "unavailable") if torchaudio else "unavailable"},
@@ -142,9 +140,11 @@ def run_corpus_benchmark(
     device: str = "auto",
     debug: bool = False,
     dnsmos_model_dir: Path | None = Path("models/dnsmos"),
-    workers: int = 2,
+    workers: int = 1,
 ) -> tuple[dict, Path]:
     """Benchmark all audio candidates, retaining per-file failures instead of aborting a corpus."""
+    if workers != 1:
+        raise ValueError("Stereo benchmark requires workers=1 to stay within one CPU thread")
     started = perf_counter()
     corpus_dir, output_dir = Path(corpus_dir), Path(output_dir)
     candidates = discover_corpus_audio(corpus_dir)
@@ -168,11 +168,7 @@ def run_corpus_benchmark(
             return None, sample_entry, row_entry
 
     indexed_candidates = list(enumerate(candidates))
-    if workers > 1 and len(candidates) > 1:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(tqdm.tqdm(pool.map(_benchmark_candidate, indexed_candidates), total=len(candidates), desc="Benchmarking files"))
-    else:
-        results = [_benchmark_candidate(item) for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files")]
+    results = [_benchmark_candidate(item) for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files")]
 
     for report, sample_entry, row_entry in results:
         if report is not None:

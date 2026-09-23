@@ -67,6 +67,9 @@ def _setup_runtime_environment(cfg: DictConfig) -> dict[str, str]:
     env["VECLIB_MAXIMUM_THREADS"] = "1"
     env["NUMEXPR_NUM_THREADS"] = "1"
     env["TORCH_NUM_THREADS"] = "1"
+    env["NUMBA_NUM_THREADS"] = "1"
+    env["OMP_THREAD_LIMIT"] = "1"
+    env["BLIS_NUM_THREADS"] = "1"
 
     # PYTHONPATH
     duplex_src = str(ROOT_DIR / "pipeline" / "duplexchat" / "src")
@@ -328,7 +331,8 @@ def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
         logger.info("Corpus directory %s does not exist. Skipping benchmark step.", corpus_dir)
         return 0
 
-    workers = cfg.get("workers") or cfg.get("optimization", {}).get("workers", 2)
+    workers = 1  # Benchmark's total CPU budget is one worker, independent of pipeline worker settings.
+    logger.info("Stereo benchmark CPU budget: 1 worker on 1 CPU core")
     cmd = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "benchmark_stereo.py"),
