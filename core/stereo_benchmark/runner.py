@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -26,7 +26,7 @@ from .dynamics import (
     analyze_turns, inactive_channel_energy_ratio_db,
 )
 from .models import acoustic_metrics, prepare_speech, speaker_metrics
-from .report import flatten_report, render_tables, summarize_reports
+from .report import RunningSummary, flatten_report, render_tables, summarize_reports, write_json_atomic
 
 
 SUPPORTED_AUDIO_SUFFIXES = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
@@ -150,8 +150,29 @@ def run_corpus_benchmark(
     corpus_dir, output_dir = Path(corpus_dir), Path(output_dir)
     candidates = discover_corpus_audio(corpus_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    reports, samples, rows = [], [], []
+    running_summary = RunningSummary()
+    results = {}
+    report_path = output_dir / "corpus_report.json"
     import tqdm
+
+    def snapshot() -> dict:
+        ordered = [results[index] for index in sorted(results)]
+        elapsed = perf_counter() - started
+        return {
+            "input": str(corpus_dir.resolve()),
+            "candidate_count": len(candidates),
+            "completed_count": len(results),
+            "status": "complete" if len(results) == len(candidates) else "running",
+            "summary": running_summary.snapshot(),
+            "samples": [item[1] for item in ordered],
+            "runtime": {"total_seconds": elapsed, "files_per_second": len(results) / elapsed if elapsed else None},
+        }
+
+    def record(index: int, result: tuple) -> None:
+        results[index] = result
+        if result[0] is not None:
+            running_summary.add(result[0])
+        write_json_atomic(report_path, snapshot())
 
     def _benchmark_candidate(item):
         index, audio_path = item
@@ -169,28 +190,21 @@ def run_corpus_benchmark(
             return None, sample_entry, row_entry
 
     indexed_candidates = list(enumerate(candidates))
+    write_json_atomic(report_path, snapshot())
     if workers > 1 and len(indexed_candidates) > 1:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(tqdm.tqdm(pool.map(_benchmark_candidate, indexed_candidates), total=len(candidates), desc="Benchmarking files"))
+            futures = {pool.submit(_benchmark_candidate, item): item[0] for item in indexed_candidates}
+            for future in tqdm.tqdm(as_completed(futures), total=len(candidates), desc="Benchmarking files"):
+                record(futures[future], future.result())
     else:
-        results = [_benchmark_candidate(item) for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files")]
+        for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files"):
+            record(item[0], _benchmark_candidate(item))
 
-    for report, sample_entry, row_entry in results:
-        if report is not None:
-            reports.append(report)
-        samples.append(sample_entry)
-        rows.append(row_entry)
-
-    summary = summarize_reports(reports)
-    elapsed = perf_counter() - started
-    corpus_report = {
-        "input": str(corpus_dir.resolve()), "candidate_count": len(candidates), "summary": summary, "samples": samples,
-        "runtime": {"total_seconds": elapsed, "files_per_second": len(candidates) / elapsed if elapsed else None},
-    }
-    report_path = output_dir / "corpus_report.json"
-    _write_json(report_path, corpus_report)
-    (output_dir / "summary.md").write_text(render_tables(summary) + "\n", encoding="utf-8")
-    _write_csv(output_dir / "per_file.csv", rows)
+    corpus_report = snapshot()
+    write_json_atomic(report_path, corpus_report)
+    ordered = [results[index] for index in sorted(results)]
+    (output_dir / "summary.md").write_text(render_tables(corpus_report["summary"]) + "\n", encoding="utf-8")
+    _write_csv(output_dir / "per_file.csv", [item[2] for item in ordered])
     return corpus_report, report_path
 
 

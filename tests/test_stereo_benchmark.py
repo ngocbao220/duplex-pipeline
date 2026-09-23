@@ -393,6 +393,79 @@ def test_corpus_rejects_nonpositive_workers(tmp_path):
         run_corpus_benchmark(tmp_path, tmp_path / "out", workers=0)
 
 
+def test_corpus_report_is_available_and_updated_between_files(monkeypatch, tmp_path):
+    import json
+    import core.stereo_benchmark.runner as runner
+
+    for name in ("a.wav", "b.wav"):
+        sf.write(tmp_path / name, np.zeros((160, 2)), 16000)
+    output_dir = tmp_path / "out"
+    observed = []
+
+    def fake_benchmark(audio_path, file_dir, *_args):
+        current = json.loads((output_dir / "corpus_report.json").read_text())
+        observed.append((current["status"], current["completed_count"], current["summary"]["sample_count"]))
+        return {"input": {"duration_sec": 1.0}}, file_dir / "report.json"
+
+    monkeypatch.setattr(runner, "run_benchmark", fake_benchmark)
+    result, report_path = runner.run_corpus_benchmark(tmp_path, output_dir, workers=1)
+
+    assert observed == [("running", 0, 0), ("running", 1, 1)]
+    assert json.loads(report_path.read_text())["status"] == "complete"
+    assert result["completed_count"] == 2
+    assert result["summary"]["sample_count"] == 2
+
+
+def test_corpus_progress_records_fast_file_before_slow_file(monkeypatch, tmp_path):
+    import json
+    from time import monotonic, sleep
+    import core.stereo_benchmark.runner as runner
+
+    for name in ("a.wav", "b.wav"):
+        sf.write(tmp_path / name, np.zeros((160, 2)), 16000)
+    output_dir = tmp_path / "out"
+
+    def fake_benchmark(audio_path, file_dir, *_args):
+        if audio_path.name == "a.wav":
+            deadline = monotonic() + 2
+            while monotonic() < deadline:
+                progress = json.loads((output_dir / "corpus_report.json").read_text())
+                if progress["completed_count"] == 1:
+                    assert progress["samples"][0]["source"] == "b.wav"
+                    break
+                sleep(0.01)
+            else:
+                raise AssertionError("Fast file was not reflected in live corpus report")
+        return {"input": {"duration_sec": 1.0}}, file_dir / "report.json"
+
+    monkeypatch.setattr(runner, "run_benchmark", fake_benchmark)
+    result, _ = runner.run_corpus_benchmark(tmp_path, output_dir, workers=2)
+
+    assert [sample["source"] for sample in result["samples"]] == ["a.wav", "b.wav"]
+    assert all(sample["status"] == "ok" for sample in result["samples"])
+
+
+def test_corpus_progress_counts_failures_without_averaging_them(monkeypatch, tmp_path):
+    import json
+    import core.stereo_benchmark.runner as runner
+
+    for name in ("a.wav", "b.wav"):
+        sf.write(tmp_path / name, np.zeros((160, 2)), 16000)
+
+    def fake_benchmark(audio_path, file_dir, *_args):
+        if audio_path.name == "b.wav":
+            raise RuntimeError("bad audio")
+        return {"input": {"duration_sec": 1.0}}, file_dir / "report.json"
+
+    monkeypatch.setattr(runner, "run_benchmark", fake_benchmark)
+    result, report_path = runner.run_corpus_benchmark(tmp_path, tmp_path / "out", workers=1)
+
+    assert result["completed_count"] == 2
+    assert result["summary"]["sample_count"] == 1
+    assert [sample["status"] for sample in result["samples"]] == ["ok", "failed"]
+    assert json.loads(report_path.read_text()) == result
+
+
 def test_corpus_discovery_recurses_over_supported_audio_files(tmp_path):
     _stereo = tmp_path / "nested" / "audio.stereo.wav"
     _stereo.parent.mkdir()
@@ -420,6 +493,21 @@ def test_summary_and_markdown_tables_include_requested_metrics():
     assert "Turn Exchange" in rendered
     assert "Overlap Transition" in rendered
     assert "Meaning" in rendered
+
+
+def test_running_summary_matches_final_summary_with_unavailable_metrics():
+    from core.stereo_benchmark.report import RunningSummary
+
+    reports = [
+        {"acoustic_quality": {"dnsmos": {"mean": {"ovrl": 3.0}}, "nisqa": {}}, "speech_activity": {"overlap": {"percentage": 5.0}}},
+        {"acoustic_quality": {"dnsmos": {"mean": {"ovrl": 4.0}}, "nisqa": {"mean": {"nisqa_mos": 4.5}}}, "speech_activity": {"overlap": {"percentage": 15.0}}},
+    ]
+    running = RunningSummary()
+    assert running.snapshot() == summarize_reports([])
+    for report in reports:
+        running.add(report)
+
+    assert running.snapshot() == summarize_reports(reports)
 
 
 def test_check_benchmark_models_preflight(tmp_path):

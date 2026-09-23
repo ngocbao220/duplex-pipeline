@@ -1,6 +1,10 @@
 """Aggregate and render reference-free stereo benchmark reports."""
 from __future__ import annotations
 
+import json
+import tempfile
+from pathlib import Path
+
 
 def summarize_reports(reports: list[dict]) -> dict:
     values = {
@@ -25,6 +29,46 @@ def summarize_reports(reports: list[dict]) -> dict:
     metrics = {name: _mean(items) for name, items in values.items()}
     metrics["overlap_transition_pct"] = _scale(metrics.pop("overlapping_transition_rate"), 100)
     return {"sample_count": len(reports), "metrics": metrics}
+
+
+class RunningSummary:
+    """Maintain the same per-file means without rescanning every completed report."""
+
+    def __init__(self) -> None:
+        self.sample_count = 0
+        self._names = tuple(summarize_reports([])["metrics"])
+        self._totals = {name: 0.0 for name in self._names}
+        self._counts = {name: 0 for name in self._names}
+
+    def add(self, report: dict) -> None:
+        self.sample_count += 1
+        for name, value in summarize_reports([report])["metrics"].items():
+            if value is not None:
+                self._totals[name] += value
+                self._counts[name] += 1
+
+    def snapshot(self) -> dict:
+        return {
+            "sample_count": self.sample_count,
+            "metrics": {
+                name: self._totals[name] / self._counts[name] if self._counts[name] else None
+                for name in self._names
+            },
+        }
+
+
+def write_json_atomic(path: Path, data: dict) -> None:
+    """Replace an aggregate snapshot only after its JSON is fully written."""
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+            temp_path = Path(handle.name)
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        temp_path.replace(path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 def render_tables(summary: dict) -> str:
