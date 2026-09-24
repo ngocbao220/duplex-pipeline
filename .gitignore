@@ -94,5 +94,6 @@ refs/
 pipeline/sommelier/vendor/SepReformer/models/*/log/
 pipeline/sommelier/vendor/podcast_pipeline/output/
 
-
+nemo-wheelhouse
 transcripts/
+manifest.json

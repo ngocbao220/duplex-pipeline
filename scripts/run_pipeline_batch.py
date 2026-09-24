@@ -617,6 +617,8 @@ def run_batch():
                         help="Hard safety cap for auto-tuned file workers per GPU.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print executable commands without running them.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Keep per-audio intermediate files under each output folder's debug directory.")
     args = parser.parse_args()
     workflow_id = os.environ.get("PIPELINE_RUN_ID") or dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     phase_started_at = dt.datetime.now(dt.UTC)
@@ -719,6 +721,8 @@ def run_batch():
                     *dev_args,
                     filter_flag
                 ]
+                if args.debug:
+                    cmd.append("--debug")
                 if args.lid:
                     cmd.extend(["--lid", args.lid, "--min-lid-prob", str(args.min_lid_prob)])
                 if args.diarization_backend:
@@ -748,6 +752,8 @@ def run_batch():
 
                 filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
                 cmd = [sys.executable, "-m", "duplexchat", "split_valid_dialogue", "--input", str(wav), "--output-dir", str(sub_out), *dev_args, filter_flag]
+                if args.debug:
+                    cmd.append("--debug")
                 if args.lid:
                     cmd.extend(["--lid", args.lid, "--min-lid-prob", str(args.min_lid_prob)])
                 if args.diarization_backend:

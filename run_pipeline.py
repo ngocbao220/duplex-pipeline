@@ -171,6 +171,8 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         "--pattern", str(cfg.data.get("pattern", "*.wav")),
         "--workers", str(workers),
     ]
+    if cfg.get("debug", False):
+        cmd.append("--debug")
     _append_resource_tuning_args(cmd, cfg)
 
     split_cfg = cfg.get("dialogue_split") or cfg.get("pipeline", {})
