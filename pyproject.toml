@@ -30,7 +30,7 @@ duplexchat = [
     "demucs==4.0.1",
 ]
 diarization-pyannote = [
-    "pyannote.audio==3.3.2",
+    "pyannote.audio==4.0.7",
 ]
 diarization-sortformer = [
     "Cython==3.1.2",

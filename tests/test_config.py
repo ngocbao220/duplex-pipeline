@@ -294,7 +294,7 @@ def test_core_runtime_dependencies_are_pinned():
     assert "transformers~=4.57.0" in duplex_deps
     assert "huggingface-hub>=0.34.0,<1.0" in duplex_deps
     assert "speechbrain==1.0.3" in duplex_deps
-    assert "pyannote.audio==3.3.2" in duplex_deps
+    assert "pyannote.audio==4.0.7" in duplex_deps
     assert duplex_cfg.get("tool", {}).get("uv", {}).get("extra-build-dependencies", {}).get("youtokentome") == ["Cython"]
 
     # sommelier pyproject.toml

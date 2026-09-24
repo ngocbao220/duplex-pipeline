@@ -278,7 +278,19 @@ def _load_pyannote_pipeline(model: str, device: str = "cuda") -> "Pipeline":
 
     target_str = str(local_target)
     _patch_pyannote_hf_token_compat()
-    pipeline = Pipeline.from_pretrained(target_str, use_auth_token=token or False)
+    import inspect
+
+    loader_parameters = inspect.signature(Pipeline.from_pretrained).parameters
+    if "token" in loader_parameters:
+        auth_kwargs = {"token": token or False}
+    elif "use_auth_token" in loader_parameters:
+        auth_kwargs = {"use_auth_token": token or False}
+    else:
+        raise RuntimeError(
+            "Unsupported pyannote.audio Pipeline.from_pretrained API: expected a 'token' "
+            "or 'use_auth_token' parameter. Install the pinned DuplexChat requirements."
+        )
+    pipeline = Pipeline.from_pretrained(target_str, **auth_kwargs)
 
     resolved_device = _resolve_device(device)
     pipeline.to(torch.device(resolved_device))

@@ -14,7 +14,8 @@ soundfile
 pydub
 librosa
 demucs==4.0.1
-pyannote.audio==3.3.2
+# Community-1 pipeline config uses PLDA, supported by pyannote.audio 4.
+pyannote.audio==4.0.7
 speechbrain==1.0.3
 diffusers==0.30.0
 huggingface-hub>=0.34.0,<1.0
