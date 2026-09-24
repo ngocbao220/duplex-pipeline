@@ -14,6 +14,7 @@ paths:
   squim: ${env.paths.base_models}/squim_objective_dns2020.pth
   whisper: openai/whisper-small
   sortformer: nvidia/diar_streaming_sortformer_4spk-v2.1
+  nemotron: nvidia/Nemotron-3-Diarization
   sepreformer: /kaggle/input/models/ngocbaotrinhtuan/sepreformer-base-wsj0/pytorch/default/1/sepreformer_base_wsj0.pth
   youtube: /kaggle/input/datasets/ngocbaotrinhtuan/youtube
   podcast_index: /kaggle/input/datasets/ngocbaotrinhtuan/podcast-index

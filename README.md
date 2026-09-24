@@ -55,6 +55,14 @@ Lọc dialogue hai người:
 python run_pipeline.py step=split_dialogue pipeline=duplexchat env=sever gpu=0 data.source=youtube optimization.workers=4 diarization=sortformer dialogue_split.music_filter.enabled=true dialogue_split.lid.enabled=true dialogue_split.lid.code=vi
 ```
 
+Có thể chọn Nemotron 3 Diarization cho bước diarization bằng `diarization=nemotron`. Ở chế độ `env=sever`, đặt checkpoint `Nemotron-3-Diarization.nemo` tại `${env.paths.base_models}/Nemotron-3-Diarization.nemo` hoặc override `env.paths.nemotron` bằng đường dẫn local. Ở chế độ `env=dev`, cấu hình dùng model ID `nvidia/Nemotron-3-Diarization` và cần Hugging Face token khi tải lần đầu.
+
+```text
+python run_pipeline.py step=split_dialogue pipeline=duplexchat env=sever gpu=0 data.source=youtube optimization.workers=4 diarization=nemotron
+```
+
+Adapter dùng NeMo `SortformerEncLabelModel` và cấu hình Nemotron offline-style 30,4 giây theo [model card chính thức](https://huggingface.co/nvidia/Nemotron-3-Diarization). Lựa chọn này áp dụng cho bước `split_dialogue`; bước `sommelier` vẫn dùng diarization model được tích hợp riêng trong pipeline Sommelier.
+
 Sau batch, xem `split_dialogue_report.json` ngay trong `data.dialogue_dir`: báo cáo ghi LID đang bật hay tắt, model/ngưỡng xác suất, tổng candidate/clip xuất ra, số clip bị loại theo từng lý do, và lý do của mọi audio không tạo được clip. Phần `retention` cho biết tổng giờ audio gốc, số giờ và phần trăm còn lại sau lọc dialogue và sau LID; terminal cũng in phase làm giảm thời lượng nhiều nhất. Các phần trăm retention tính trên tổng audio gốc. Audio không có manifest được tính vào tổng nguồn nhưng không gán phần thời lượng thiếu cho bộ lọc nào; xem `unprocessed_source_hours`. Mỗi `<audio>/manifest.json` có `candidate_dialogues` để truy ngược timestamp và quyết định của từng candidate.
 
 ### Bản đồ phân bố transcript

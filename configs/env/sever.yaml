@@ -16,5 +16,6 @@ paths:
   squim: ${env.paths.base_models}/squim_objective_dns2020.pth
   whisper: /raid/voice/chauhn3/whisper/whisper-large-v3
   sortformer: ${env.paths.base_models}/diar_streaming_sortformer_4spk-v2.1
+  nemotron: ${env.paths.base_models}/Nemotron-3-Diarization.nemo
   sepreformer: ${env.paths.base_models}/epoch.0180.pth
   demucs: ${env.paths.base_models}/htdemucs

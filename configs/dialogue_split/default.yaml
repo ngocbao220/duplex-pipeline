@@ -2,8 +2,8 @@
 name: default
 
 diarization:
-  backend: sortformer
-  model: ${env.paths.sortformer}
+  backend: ${diarization.backend}
+  model: ${diarization.model}
 
 music_filter:
   enabled: true

@@ -83,6 +83,8 @@ def _setup_runtime_environment(cfg: DictConfig) -> dict[str, str]:
     # Specific model paths
     if cfg.env.paths.get("sortformer"):
         env["SORTFORMER_MODEL_PATH"] = str(cfg.env.paths.sortformer)
+    if cfg.env.paths.get("nemotron"):
+        env["NEMOTRON_DIARIZATION_MODEL_PATH"] = str(cfg.env.paths.nemotron)
     if cfg.env.paths.get("silero_vad"):
         env["SILERO_VAD_MODEL_PATH"] = str(cfg.env.paths.silero_vad)
     if cfg.env.paths.get("dialoguesidon"):

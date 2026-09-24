@@ -213,10 +213,14 @@ def load_diarization_pipeline(
         backend_norm = infer_diarization_backend(model)
     if backend_norm == "sortformer":
         return _load_sortformer_pipeline(model, device, max_chunk_duration=max_chunk_duration)
+    if backend_norm == "nemotron":
+        return _load_sortformer_pipeline(
+            model, device, max_chunk_duration=max_chunk_duration, model_family="nemotron",
+        )
     if backend_norm == "diarizen":
         return _load_diarizen_pipeline(model, device)
     if backend_norm != "pyannote":
-        raise ValueError("Unsupported diarization backend '%s'. Use auto, pyannote, sortformer, or diarizen." % backend)
+        raise ValueError("Unsupported diarization backend '%s'. Use auto, pyannote, sortformer, nemotron, or diarizen." % backend)
     return _load_pyannote_pipeline(model, device)
 
 
@@ -265,10 +269,14 @@ def _load_sortformer_pipeline(
     model: str,
     device: str = "cuda",
     max_chunk_duration: float | str | None = None,
+    model_family: str = "sortformer",
 ) -> SortformerDiarizationAdapter:
     enforce_offline_mode()
+    is_nemotron = model_family == "nemotron"
+    model_env_var = "NEMOTRON_DIARIZATION_MODEL_PATH" if is_nemotron else "SORTFORMER_MODEL_PATH"
+    model_subpath = "Nemotron-3-Diarization" if is_nemotron else "diar_streaming_sortformer_4spk-v2.1"
     local_target, is_local = resolve_local_model_path(
-        model, env_var="SORTFORMER_MODEL_PATH", default_subpath="diar_streaming_sortformer_4spk-v2.1"
+        model, env_var=model_env_var, default_subpath=model_subpath
     )
     _suppress_nemo_logs()
 
@@ -308,7 +316,11 @@ def _load_sortformer_pipeline(
     if is_offline_mode() and not is_local and not target_path.exists():
         assert_local_model_exists(
             local_target,
-            model_name_hint="NVIDIA Sortformer Diarization Model (e.g. diar_streaming_sortformer_4spk-v2.1.nemo)"
+            model_name_hint=(
+                "NVIDIA Nemotron-3-Diarization Model (Nemotron-3-Diarization.nemo)"
+                if is_nemotron else
+                "NVIDIA Sortformer Diarization Model (e.g. diar_streaming_sortformer_4spk-v2.1.nemo)"
+            )
         )
 
     target_str = str(local_target)
@@ -333,6 +345,13 @@ def _load_sortformer_pipeline(
         """
         _patch_sortformer_modules()
 
+        def _restore_model(path: str):
+            if is_nemotron:
+                return SortformerEncLabelModel.restore_from(
+                    path, map_location=_resolve_device(device), strict=False,
+                )
+            return SortformerEncLabelModel.restore_from(path)
+
         def _has_unsupported_err(exc: BaseException) -> bool:
             """Đệ quy kiểm tra exception chain có chứa lỗi unexpected keyword argument không."""
             seen = set()
@@ -346,7 +365,7 @@ def _load_sortformer_pipeline(
             return False
 
         try:
-            return SortformerEncLabelModel.restore_from(path_str)
+            return _restore_model(path_str)
         except Exception as e:  # noqa: BLE001
             if not _has_unsupported_err(e):
                 raise
@@ -388,7 +407,7 @@ def _load_sortformer_pipeline(
                     for f in sorted(tmp_path.rglob("*")):
                         if f != patched and f.is_file():
                             tar.add(f, arcname=str(f.relative_to(tmp_path)))
-                return SortformerEncLabelModel.restore_from(str(patched))
+                return _restore_model(str(patched))
 
 
     if target_path.is_file() and target_str.endswith(".nemo"):
@@ -413,13 +432,26 @@ def _load_sortformer_pipeline(
     try:
         import inspect
         forward_src = inspect.getsource(diar_model.forward)
-        if 'raise NotImplementedError("Streaming mode is not implemented yet.")' in forward_src:
+        if not is_nemotron and 'raise NotImplementedError("Streaming mode is not implemented yet.")' in forward_src:
             _disable_sortformer_streaming_mode(diar_model)
     except Exception:
         pass
 
     if hasattr(diar_model, "eval"):
         diar_model.eval()
+    if is_nemotron:
+        modules = getattr(diar_model, "sortformer_modules", None)
+        if modules is None:
+            raise RuntimeError("Nemotron-3-Diarization checkpoint has no sortformer_modules")
+        # NVIDIA model card's recommended 30.4-second offline-style configuration.
+        modules.chunk_len = 340
+        modules.chunk_right_context = 40
+        modules.fifo_len = 40
+        modules.spkcache_update_period = 300
+        check_parameters = getattr(diar_model, "_check_streaming_parameters", None)
+        if not callable(check_parameters):
+            raise RuntimeError("Installed NeMo version lacks _check_streaming_parameters required by Nemotron")
+        check_parameters()
     resolved_device = _resolve_device(device)
     if hasattr(diar_model, "to"):
         diar_model.to(torch.device(resolved_device))

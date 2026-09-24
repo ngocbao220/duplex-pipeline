@@ -403,7 +403,9 @@ def _log_preflight_info(args, input_dir: Path, output_dir: Path) -> None:
     if args.step == "split_dialogue":
         diar_model = resolve_model_alias(args.diarization_model, DIARIZATION_MODELS) or args.diarization_model or "pyannote/speaker-diarization-community-1"
         backend = (args.diarization_backend or "auto").lower()
-        if "sortformer" in backend or "sortformer" in diar_model.lower():
+        if backend == "nemotron" or "nemotron-3-diarization" in diar_model.lower():
+            models_to_check.append(("Diarization (Nemotron 3)", diar_model, "NEMOTRON_DIARIZATION_MODEL_PATH", "Nemotron-3-Diarization", None))
+        elif "sortformer" in backend or "sortformer" in diar_model.lower():
             models_to_check.append(("Diarization (Sortformer)", diar_model, "SORTFORMER_MODEL_PATH", "diar_streaming_sortformer_4spk-v2.1", None))
         else:
             models_to_check.append(("Diarization (Pyannote)", diar_model, "PYANNOTE_MODEL_PATH", "speaker-diarization-community-1", None))
