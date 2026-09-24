@@ -174,8 +174,12 @@ def _run_gpu_items(items, gpu_list: list[str], handler, *, resource_mode: str,
     return calibration_results + run_with_tickets(items[len(calibration_items):], tickets), plan
 
 
-def _summarize_split_dialogue_manifests(output_dir: Path, input_audio_count: int) -> dict:
-    """Build an inspectable LID and rejection audit from per-audio manifests."""
+def _summarize_split_dialogue_manifests(
+    output_dir: Path,
+    input_audio_count: int,
+    input_audio_durations: dict[str, float | None] | None = None,
+) -> dict:
+    """Build a filter and duration-retention audit from per-audio manifests."""
     audio = []
     counts = {
         "input_audio": input_audio_count,
@@ -189,6 +193,19 @@ def _summarize_split_dialogue_manifests(output_dir: Path, input_audio_count: int
         "zero_dialogue_audio": 0,
     }
     lid_configs = []
+    source_seconds = sum(value for value in (input_audio_durations or {}).values() if value is not None)
+    processed_source_seconds = 0.0
+    after_dialogue_seconds = 0.0
+    after_lid_seconds = 0.0
+
+    def _retention_stage(seconds: float | None, denominator: float | None) -> dict:
+        return {
+            "hours": seconds / 3600.0 if seconds is not None else None,
+            "retention_percent_of_source": (
+                seconds / denominator * 100.0
+                if seconds is not None and denominator is not None and denominator > 0 else None
+            ),
+        }
 
     for manifest_path in sorted(output_dir.glob("*/manifest.json")):
         try:
@@ -200,6 +217,24 @@ def _summarize_split_dialogue_manifests(output_dir: Path, input_audio_count: int
         lid = summary.get("lid", {})
         lid_configs.append(lid)
         dialogue_count = int(manifest.get("dialogue_count", 0))
+        source_audio = manifest.get("source_audio")
+        source_duration = manifest.get("audio_duration_sec")
+        source_key = str(Path(source_audio).resolve()) if source_audio else None
+        if source_duration is None and source_key and input_audio_durations:
+            source_duration = input_audio_durations.get(source_key)
+        source_duration = float(source_duration) if source_duration is not None else None
+        candidate_seconds = sum(
+            float(row.get("duration", float(row.get("end", 0)) - float(row.get("start", 0))))
+            for row in (manifest.get("candidate_dialogues") or [])
+        )
+        exported_seconds = sum(
+            float(row.get("duration", float(row.get("end", 0)) - float(row.get("start", 0))))
+            for row in (manifest.get("dialogues") or [])
+        )
+        if source_duration is not None:
+            processed_source_seconds += source_duration
+        after_dialogue_seconds += candidate_seconds
+        after_lid_seconds += exported_seconds
         counts["manifest_audio"] += 1
         counts["candidate_dialogues"] += int(summary.get("candidate_dialogue_count", 0))
         counts["exported_dialogues"] += int(summary.get("exported_dialogue_count", dialogue_count))
@@ -208,12 +243,40 @@ def _summarize_split_dialogue_manifests(output_dir: Path, input_audio_count: int
         counts["rejected_imbalanced"] += int(summary.get("rejected_imbalanced", 0))
         counts["monologue_audio"] += int(summary.get("diarized_speaker_count", 0) < 2)
         counts["zero_dialogue_audio"] += int(dialogue_count == 0)
-        audio.append({
-            "source_audio": manifest.get("source_audio"),
+        audio_item = {
+            "source_audio": source_audio,
             "dialogue_count": dialogue_count,
             "skip_reason": manifest.get("skip_reason"),
             "filter_summary": summary,
-        })
+            "retention": {
+                "source": _retention_stage(source_duration, source_duration),
+                "after_dialogue": _retention_stage(candidate_seconds, source_duration),
+                "after_lid": _retention_stage(exported_seconds, source_duration),
+            },
+        }
+        audio.append(audio_item)
+
+    # Include input files without a completed manifest so report coverage is visible.
+    if input_audio_durations:
+        known_sources = {
+            str(Path(item["source_audio"]).resolve())
+            for item in audio if item.get("source_audio")
+        }
+        for source, duration in input_audio_durations.items():
+            source_key = str(Path(source).resolve())
+            if source_key in known_sources:
+                continue
+            audio.append({
+                "source_audio": source,
+                "dialogue_count": None,
+                "skip_reason": "No completed manifest",
+                "filter_summary": None,
+                "retention": {
+                    "source": _retention_stage(duration, duration),
+                    "after_dialogue": _retention_stage(None, duration),
+                    "after_lid": _retention_stage(None, duration),
+                },
+            })
 
     enabled_values = {bool(config.get("enabled")) for config in lid_configs}
     lid = {"enabled": None, "model": None, "min_vi_probability": None}
@@ -224,7 +287,29 @@ def _summarize_split_dialogue_manifests(output_dir: Path, input_audio_count: int
         lid["model"] = first.get("model")
         lid["min_vi_probability"] = first.get("min_vi_probability")
 
-    return {"step": "split_dialogue", "lid": lid, "counts": counts, "audio": audio}
+    if source_seconds <= 0 and processed_source_seconds > 0:
+        source_seconds = processed_source_seconds
+    dialogue_removed_seconds = max(0.0, processed_source_seconds - after_dialogue_seconds)
+    lid_removed_seconds = max(0.0, after_dialogue_seconds - after_lid_seconds)
+
+    def retention_stage(seconds: float, removed_seconds: float | None = None) -> dict:
+        stage = _retention_stage(seconds, source_seconds)
+        if removed_seconds is not None:
+            stage["removed_hours"] = removed_seconds / 3600.0
+            stage["removed_percent_of_source"] = (removed_seconds / source_seconds * 100.0) if source_seconds > 0 else None
+        return stage
+
+    removed = {"dialogue": dialogue_removed_seconds, "lid": lid_removed_seconds}
+    largest_filter_phase = max(removed, key=removed.get) if any(removed.values()) else None
+    retention = {
+        "source_hours": source_seconds / 3600.0,
+        "processed_source_hours": processed_source_seconds / 3600.0,
+        "unprocessed_source_hours": max(0.0, source_seconds - processed_source_seconds) / 3600.0,
+        "after_dialogue": retention_stage(after_dialogue_seconds, dialogue_removed_seconds),
+        "after_lid": retention_stage(after_lid_seconds, lid_removed_seconds),
+        "largest_duration_drop_phase": largest_filter_phase,
+    }
+    return {"step": "split_dialogue", "lid": lid, "counts": counts, "retention": retention, "audio": audio}
 
 
 def _write_split_dialogue_report(output_dir: Path, report: dict) -> Path:
@@ -252,6 +337,23 @@ def _print_split_dialogue_summary(report: dict, report_path: Path) -> None:
     print(
         "Clips: {candidate_dialogues} candidates, {exported_dialogues} exported, "
         "{rejected_by_lid} rejected by LID, {rejected_short} short, {rejected_imbalanced} imbalanced".format(**counts)
+    )
+    retention = report["retention"]
+    dialogue = retention["after_dialogue"]
+    after_lid = retention["after_lid"]
+    dialogue_pct = dialogue["retention_percent_of_source"]
+    lid_pct = after_lid["retention_percent_of_source"]
+    dialogue_pct_text = f"{dialogue_pct:.1f}%" if dialogue_pct is not None else "N/A"
+    lid_pct_text = f"{lid_pct:.1f}%" if lid_pct is not None else "N/A"
+    print(
+        f"Duration: {retention['source_hours']:.2f} h source -> "
+        f"{dialogue['hours']:.2f} h after dialogue ({dialogue_pct_text} retained) -> "
+        f"{after_lid['hours']:.2f} h after LID ({lid_pct_text} retained)"
+    )
+    print(
+        f"Duration removed: dialogue {dialogue['removed_hours']:.2f} h, "
+        f"LID {after_lid['removed_hours']:.2f} h; largest drop: "
+        f"{retention['largest_duration_drop_phase'] or 'none'}"
     )
     for item in report["audio"]:
         if item["dialogue_count"] == 0:
@@ -946,7 +1048,14 @@ def run_batch():
 
     if not args.dry_run:
         if args.step == "split_dialogue":
-            split_report = _summarize_split_dialogue_manifests(output_dir, input_audio_count=len(wav_files))
+            input_audio_durations = {
+                str(wav.resolve()): _audio_duration_seconds(wav) for wav in wav_files
+            }
+            split_report = _summarize_split_dialogue_manifests(
+                output_dir,
+                input_audio_count=len(wav_files),
+                input_audio_durations=input_audio_durations,
+            )
             split_report_path = _write_split_dialogue_report(output_dir, split_report)
             _print_split_dialogue_summary(split_report, split_report_path)
         phase = _phase_report(args.step, args, phase_started_at, perf_counter() - phase_started, timing_items, resource_plan)

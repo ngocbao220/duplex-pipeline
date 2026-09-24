@@ -116,8 +116,11 @@ def test_split_dialogue_report_counts_lid_decisions_and_lists_rejected_audio(tmp
     rejected.mkdir()
     (accepted / "manifest.json").write_text(json.dumps({
         "source_audio": "/input/accepted.wav",
+        "audio_duration_sec": 3600,
         "dialogue_count": 1,
         "skip_reason": None,
+        "candidate_dialogues": [{"duration": 120}, {"duration": 60, "decision": "rejected_by_lid"}],
+        "dialogues": [{"duration": 120}],
         "filter_summary": {
             "candidate_dialogue_count": 2,
             "exported_dialogue_count": 1,
@@ -130,8 +133,11 @@ def test_split_dialogue_report_counts_lid_decisions_and_lists_rejected_audio(tmp
     }), encoding="utf-8")
     (rejected / "manifest.json").write_text(json.dumps({
         "source_audio": "/input/rejected.wav",
+        "audio_duration_sec": 1800,
         "dialogue_count": 0,
         "skip_reason": "All 1 candidate clips rejected by Whisper LID",
+        "candidate_dialogues": [{"duration": 90, "decision": "rejected_by_lid"}],
+        "dialogues": [],
         "filter_summary": {
             "candidate_dialogue_count": 1,
             "exported_dialogue_count": 0,
@@ -160,6 +166,54 @@ def test_split_dialogue_report_counts_lid_decisions_and_lists_rejected_audio(tmp
     }
     assert report["audio"][1]["source_audio"] == "/input/rejected.wav"
     assert report["audio"][1]["skip_reason"] == "All 1 candidate clips rejected by Whisper LID"
+    assert report["retention"]["source_hours"] == 1.5
+    assert report["retention"]["processed_source_hours"] == 1.5
+    assert report["retention"]["after_dialogue"]["hours"] == 0.075
+    assert report["retention"]["after_dialogue"]["retention_percent_of_source"] == 5.0
+    assert report["retention"]["after_dialogue"]["removed_hours"] == 1.425
+    assert report["retention"]["after_lid"]["hours"] == 120 / 3600
+    assert report["retention"]["after_lid"]["removed_hours"] == 150 / 3600
+    assert report["retention"]["largest_duration_drop_phase"] == "dialogue"
+    assert report["audio"][0]["retention"]["after_lid"]["retention_percent_of_source"] == 120 / 3600 * 100
+
+
+def test_split_dialogue_retention_marks_unprocessed_audio_and_lid_disabled(tmp_path):
+    batch = _batch_module()
+    output_dir = tmp_path / "dialogues"
+    source = tmp_path / "input" / "complete.wav"
+    manifest_dir = output_dir / "complete"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps({
+        "source_audio": str(source),
+        "audio_duration_sec": 3600,
+        "dialogue_count": 1,
+        "candidate_dialogues": [{"duration": 300}],
+        "dialogues": [{"duration": 300}],
+        "filter_summary": {
+            "candidate_dialogue_count": 1,
+            "exported_dialogue_count": 1,
+            "rejected_by_lid": 0,
+            "rejected_short": 0,
+            "rejected_imbalanced": 0,
+            "diarized_speaker_count": 2,
+            "lid": {"enabled": False, "model": None, "min_vi_probability": None},
+        },
+    }), encoding="utf-8")
+
+    report = batch._summarize_split_dialogue_manifests(
+        output_dir,
+        input_audio_count=2,
+        input_audio_durations={str(source): 3600, str(tmp_path / "input" / "missing.wav"): 1800},
+    )
+
+    assert report["lid"]["enabled"] is False
+    assert report["retention"]["source_hours"] == 1.5
+    assert report["retention"]["unprocessed_source_hours"] == 0.5
+    assert report["retention"]["after_dialogue"]["hours"] == 300 / 3600
+    assert report["retention"]["after_lid"]["hours"] == 300 / 3600
+    assert report["retention"]["after_lid"]["removed_hours"] == 0
+    missing = next(item for item in report["audio"] if item["skip_reason"] == "No completed manifest")
+    assert missing["retention"]["after_dialogue"]["hours"] is None
 
 
 def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(monkeypatch, tmp_path):
@@ -178,7 +232,10 @@ def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(m
         (worker_output / "manifest.json").write_text(json.dumps({
             "source_audio": str(source),
             "dialogue_count": 0,
+            "audio_duration_sec": 10,
             "skip_reason": "All 1 candidate clips rejected by Whisper LID",
+            "candidate_dialogues": [{"duration": 8, "decision": "rejected_by_lid"}],
+            "dialogues": [],
             "filter_summary": {
                 "candidate_dialogue_count": 1,
                 "exported_dialogue_count": 0,
@@ -206,6 +263,9 @@ def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(m
     report = json.loads((output_dir / "split_dialogue_report.json").read_text())
     assert report["lid"] == {"enabled": True, "model": "local-whisper", "min_vi_probability": 0.7}
     assert report["counts"]["rejected_by_lid"] == 1
+    assert report["retention"]["source_hours"] == 10 / 3600
+    assert report["retention"]["after_dialogue"]["hours"] == 8 / 3600
+    assert report["retention"]["after_lid"]["hours"] == 0
 
 
 def test_cholimex_dry_run_pairs_each_duplexchat_stereo_with_its_dialogue_mixture(monkeypatch, capsys, tmp_path):
