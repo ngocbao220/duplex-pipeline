@@ -1,0 +1,4 @@
+# Optional additions for `step=topic_map`, installed in the DuplexChat runtime.
+pyvi>=0.1.1
+scikit-learn>=1.4
+matplotlib>=3.8

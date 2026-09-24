@@ -229,6 +229,47 @@ def test_hydra_config_declares_cholimex_as_a_refinement_output():
     assert cholimex["name"] == "cholimex"
 
 
+def test_topic_map_model_path_uses_environment_local_model_root():
+    root = Path(__file__).resolve().parents[1]
+    import yaml
+    from omegaconf import OmegaConf
+
+    config = yaml.safe_load((root / "configs" / "config.yaml").read_text(encoding="utf-8"))
+    assert config["topic_map"] == {
+        "input_dir": "transcripts",
+        "model_dir": "${env.paths.vietnamese_bi_encoder}",
+        "output_dir": "${env.paths.base_output}/topic-map",
+        "device": "${runtime.device}",
+    }
+    for env_name in ("sever", "dev"):
+        env_config = yaml.safe_load((root / "configs" / "env" / f"{env_name}.yaml").read_text(encoding="utf-8"))
+        assert env_config["paths"]["vietnamese_bi_encoder"] == "${env.paths.base_models}/vietnamese-bi-encoder"
+        composed = OmegaConf.load(root / "configs" / "config.yaml")
+        composed.env = OmegaConf.load(root / "configs" / "env" / f"{env_name}.yaml")
+        OmegaConf.resolve(composed)
+        assert composed.topic_map.model_dir == env_config["paths"]["base_models"] + "/vietnamese-bi-encoder"
+
+
+def test_topic_map_is_a_standalone_hydra_step_with_local_only_model_loading():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "run_pipeline.py").read_text(encoding="utf-8")
+    model_source = (root / "core" / "transcript_topic_map.py").read_text(encoding="utf-8")
+    requirements = (root / "requirements-topic-map.txt").read_text(encoding="utf-8")
+
+    assert 'elif step == "topic_map"' in source
+    assert '"--model-dir", str(resolve_path(topic_map.model_dir))' in source
+    assert "local_files_only=True" in model_source
+    assert "transformers" not in requirements
+    assert "torch" not in requirements
+
+
+def test_topic_map_step_is_not_added_to_the_existing_all_pipeline():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "run_pipeline.py").read_text(encoding="utf-8")
+    all_branch = source.split('elif step == "all":', 1)[1]
+    assert "step_topic_map(cfg, env)" not in all_branch
+
+
 def test_documented_environment_setup_uses_the_runtime_requirements_files():
     root = Path(__file__).resolve().parents[1]
     readme = (root / "README.md").read_text()

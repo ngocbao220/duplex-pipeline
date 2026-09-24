@@ -14,6 +14,12 @@ python -m pip check
 
 Để cài Sommelier, thay file requirements trong lệnh thứ hai bằng `requirements-sommelier.txt`. Hai file đã chốt ONNX có wheel Python 3.12, tránh pip backtrack về ONNX 1.10 và cố build source. `env=sever` là chế độ offline, dùng đường dẫn model/dữ liệu cục bộ trong `configs/env/sever.yaml`. `env=dev` cho phép tải model từ Hugging Face theo các đường dẫn ở `configs/env/dev.yaml`.
 
+Để tạo bản đồ chủ đề từ transcript, cài thêm các phụ thuộc tùy chọn trong cùng môi trường DuplexChat:
+
+```text
+python -m pip install -r requirements-topic-map.txt
+```
+
 ## Lệnh chạy
 
 Mẫu chung:
@@ -22,7 +28,7 @@ Mẫu chung:
 python run_pipeline.py step=<step> pipeline=<pipeline> env=<env> gpu=<gpu> data.source=<source> <override>=<value>
 ```
 
-`step` nhận một trong các giá trị `convert`, `split_dialogue`, `separate_dialogue`, `sommelier`, `cholimex`, `benchmark`, hoặc `all`. `pipeline` có đúng ba lựa chọn: `duplexchat`, `sommelier`, `cholimex`; `source` là `youtube` hoặc `podcast_index`.
+`step` nhận một trong các giá trị `convert`, `split_dialogue`, `separate_dialogue`, `sommelier`, `cholimex`, `benchmark`, `topic_map`, hoặc `all`. `pipeline` có đúng ba lựa chọn: `duplexchat`, `sommelier`, `cholimex`; `source` là `youtube` hoặc `podcast_index`.
 
 ### Chạy toàn bộ pipeline
 
@@ -50,6 +56,32 @@ python run_pipeline.py step=split_dialogue pipeline=duplexchat env=sever gpu=0 d
 ```
 
 Sau batch, xem `split_dialogue_report.json` ngay trong `data.dialogue_dir`: báo cáo ghi LID đang bật hay tắt, model/ngưỡng xác suất, tổng candidate/clip xuất ra, số clip bị loại theo từng lý do, và lý do của mọi audio không tạo được clip. Phần `retention` cho biết tổng giờ audio gốc, số giờ và phần trăm còn lại sau lọc dialogue và sau LID; terminal cũng in phase làm giảm thời lượng nhiều nhất. Các phần trăm retention tính trên tổng audio gốc. Audio không có manifest được tính vào tổng nguồn nhưng không gán phần thời lượng thiếu cho bộ lọc nào; xem `unprocessed_source_hours`. Mỗi `<audio>/manifest.json` có `candidate_dialogues` để truy ngược timestamp và quyết định của từng candidate.
+
+### Bản đồ phân bố transcript
+
+Đặt mỗi transcript dialogue thành một file UTF-8 `.txt` trong `transcripts/`. Tên file (không gồm `.txt`) được dùng làm ID; dưới đây là ví dụ một file mỗi dialogue.
+
+Tải snapshot model một lần, giữ bản `model.safetensors` để không tải thêm trọng số trùng `pytorch_model.bin`:
+
+```python
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="bkai-foundation-models/vietnamese-bi-encoder",
+    local_dir="/storage-voice/voice/vdt/baottn/duplex-model-dir/vietnamese-bi-encoder",
+    ignore_patterns=["pytorch_model.bin"],
+)
+```
+
+Mặc định `env=sever` dùng đường dẫn model từ `configs/env/sever.yaml`; `env=dev` dùng đường dẫn từ `configs/env/dev.yaml`. `topic_map.model_dir` phải trỏ tới thư mục snapshot local; bước này không fallback sang tải model từ Hub khi thiếu file. Chạy t-SNE:
+
+```text
+python run_pipeline.py step=topic_map env=sever
+```
+
+Có thể đổi các đường dẫn bằng Hydra overrides, ví dụ `topic_map.input_dir=transcripts`, `topic_map.model_dir=/models/vietnamese-bi-encoder`, `topic_map.output_dir=outputs/topic-map`, hoặc `topic_map.device=cpu`. Kết quả gồm `transcript_tsne.png` và `transcript_tsne.csv` trong thư mục output. Cần tối thiểu ba transcript không rỗng; các file hiện có trong `transcripts/` là ví dụ ngắn, chưa đủ để tạo bản đồ có ý nghĩa. Model card yêu cầu word-segment tiếng Việt; bước này tự dùng PyVi. Transcript dài được chia thành các khúc không vượt quá 256 token rồi gộp thành một embedding cho mỗi dialogue. Bản đồ t-SNE dùng để khám phá cụm/phân bố nội dung, không phải phép đo độ phủ chủ đề tuyệt đối.
+
+Nguồn triển khai: [Vietnamese Bi-Encoder model card](https://huggingface.co/bkai-foundation-models/vietnamese-bi-encoder) (word segmentation, mean pooling, sequence length 256), [PyVi](https://pypi.org/project/pyvi/) (Vietnamese tokenizer), [Transformers `from_pretrained`](https://huggingface.co/docs/transformers/main_classes/model) (local-only loading), và [scikit-learn TSNE](https://scikit-learn.org/1.4/modules/generated/sklearn.manifold.TSNE.html).
 
 Tách bằng DuplexChat:
 

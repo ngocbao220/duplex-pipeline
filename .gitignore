@@ -93,3 +93,6 @@ refs/
 # Vendor specific caches
 pipeline/sommelier/vendor/SepReformer/models/*/log/
 pipeline/sommelier/vendor/podcast_pipeline/output/
+
+
+transcripts/

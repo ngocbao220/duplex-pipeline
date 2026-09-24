@@ -9,7 +9,7 @@ defaults:
   - _self_
 
 # Execution controls
-step: all               # Options: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | benchmark
+step: all               # Options: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | benchmark | topic_map
 gpu: 0                # Target GPU ID: auto (detects all available GPUs) | "0,1" | 0 | 1
 debug: false            # Write intermediate debug audio/artifacts
 dry_run: false          # Print execution commands without running
@@ -29,6 +29,13 @@ data:
 runtime:
   device: auto
   allow_cpu_fallback: true
+
+# Transcript topic map
+topic_map:
+  input_dir: transcripts
+  model_dir: ${env.paths.vietnamese_bi_encoder}
+  output_dir: ${env.paths.base_output}/topic-map
+  device: ${runtime.device}
 
 # Concurrency & Performance Optimization (Tuned for GPU A100 40GB)
 optimization:

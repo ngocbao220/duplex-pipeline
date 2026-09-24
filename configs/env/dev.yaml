@@ -6,6 +6,7 @@ paths:
   base_models: /kaggle/input/models/ngocbaotrinhtuan
   base_data: /kaggle/input/datasets/ngocbaotrinhtuan
   base_output: outputs/processed
+  vietnamese_bi_encoder: ${env.paths.base_models}/vietnamese-bi-encoder
   dialoguesidon: sarulab-speech/DialogueSidon
   dnsmos: /kaggle/input/models/ngocbaotrinhtuan/dnsmos/pytorch/dnsmos/1
   speechbrain: speechbrain/spkrec-ecapa-voxceleb

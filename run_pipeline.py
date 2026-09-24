@@ -372,6 +372,25 @@ def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
     return _run_cmd(retention_cmd, env, dry_run=cfg.dry_run)
 
 
+def step_topic_map(cfg: DictConfig, env: dict[str, str]) -> int:
+    """Create a transcript t-SNE map using the configured local model directory."""
+    topic_map = cfg.topic_map
+
+    def resolve_path(value: str) -> Path:
+        path = Path(str(value)).expanduser()
+        return path if path.is_absolute() else ROOT_DIR / path
+
+    cmd = [
+        sys.executable,
+        str(ROOT_DIR / "scripts" / "plot_transcript_topics.py"),
+        "--input-dir", str(resolve_path(topic_map.input_dir)),
+        "--model-dir", str(resolve_path(topic_map.model_dir)),
+        "--output-dir", str(resolve_path(topic_map.output_dir)),
+        "--device", str(topic_map.device),
+    ]
+    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+
+
 def _resolve_raw_data_dir(cfg: DictConfig) -> Path:
     """Find the raw dataset directory matching data.source with Kaggle and local fallbacks."""
     raw_path = Path(cfg.data.raw_dir)
@@ -462,6 +481,9 @@ def main(cfg: DictConfig) -> None:
     elif step == "benchmark":
         sys.exit(step_benchmark(cfg, env))
 
+    elif step == "topic_map":
+        sys.exit(step_topic_map(cfg, env))
+
     elif step == "all":
         # Step 0: Convert
         if step_convert(cfg, env) != 0:
@@ -509,7 +531,7 @@ def main(cfg: DictConfig) -> None:
         logger.info("All pipeline phases completed successfully.")
 
     else:
-        logger.error("Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | benchmark", step)
+        logger.error("Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | benchmark | topic_map", step)
         sys.exit(1)
 
 

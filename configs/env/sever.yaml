@@ -6,6 +6,7 @@ paths:
   base_models: /storage-voice/voice/vdt/baottn/duplex-model-dir
   base_data: /storage-voice/voice/vdt/baottn/duplex-data
   base_output: ${env.paths.base_data}/processed
+  vietnamese_bi_encoder: ${env.paths.base_models}/vietnamese-bi-encoder
   dialoguesidon: ${env.paths.base_models}/DialogueSidon
   dnsmos: ${env.paths.base_models}/dnsmos
   # Sommelier's local ECAPA bundle must contain hyperparams.yaml at this root.
