@@ -35,7 +35,7 @@ diarization-pyannote = [
 diarization-sortformer = [
     "Cython==3.1.2",
     "packaging==24.2",
-    "nemo_toolkit[asr]==2.7.3",
+    "nemo_toolkit[asr] @ git+https://github.com/NVIDIA-NeMo/Speech.git@ca3f93a516ff172e32951928aea6f96a977a7600",
 ]
 separation-dialoguesidon = [
     "diffusers==0.30.0",

@@ -63,6 +63,8 @@ python run_pipeline.py step=split_dialogue pipeline=duplexchat env=sever gpu=0 d
 
 Adapter dùng NeMo `SortformerEncLabelModel` và cấu hình Nemotron offline-style 30,4 giây theo [model card chính thức](https://huggingface.co/nvidia/Nemotron-3-Diarization). Lựa chọn này áp dụng cho bước `split_dialogue`; bước `sommelier` vẫn dùng diarization model được tích hợp riêng trong pipeline Sommelier.
 
+Nemotron cần phiên bản NeMo Speech được pin theo commit NVIDIA hỗ trợ cả `feat_in` và `rope`; các bản PyPI NeMo 2.7.3 và 3.0.0 chưa hỗ trợ đủ cấu hình của checkpoint. Sau khi cập nhật mã nguồn, cài lại dependency trong đúng môi trường DuplexChat bằng `python -m pip install -r requirements-duplexchat.txt`.
+
 Sau batch, xem `split_dialogue_report.json` ngay trong `data.dialogue_dir`: báo cáo ghi LID đang bật hay tắt, model/ngưỡng xác suất, tổng candidate/clip xuất ra, số clip bị loại theo từng lý do, và lý do của mọi audio không tạo được clip. Phần `retention` cho biết tổng giờ audio gốc, số giờ và phần trăm còn lại sau lọc dialogue và sau LID; terminal cũng in phase làm giảm thời lượng nhiều nhất. Các phần trăm retention tính trên tổng audio gốc. Audio không có manifest được tính vào tổng nguồn nhưng không gán phần thời lượng thiếu cho bộ lọc nào; xem `unprocessed_source_hours`. Mỗi `<audio>/manifest.json` có `candidate_dialogues` để truy ngược timestamp và quyết định của từng candidate.
 
 ### Bản đồ phân bố transcript

@@ -287,7 +287,7 @@ def test_core_runtime_dependencies_are_pinned():
     assert "torch==2.8.0" in duplex_deps
     assert "torchaudio==2.8.0" in duplex_deps
     assert "torchcodec==0.7.0" in duplex_deps
-    assert "nemo_toolkit[asr]==2.7.3" in duplex_deps
+    assert "nemo_toolkit[asr] @ git+https://github.com/NVIDIA-NeMo/Speech.git@ca3f93a516ff172e32951928aea6f96a977a7600" in duplex_deps
     assert "protobuf~=5.29.5" in duplex_deps
     assert "onnx==1.22.0" in duplex_deps
     assert "onnxruntime==1.22.1" in duplex_deps
@@ -312,7 +312,7 @@ def test_core_runtime_dependencies_are_pinned():
     # requirements-duplexchat.txt core pins
     duplex_req = (root / "requirements-duplexchat.txt").read_text()
     assert "torch==2.8.0" in duplex_req
-    assert "nemo_toolkit[asr]==2.7.3" in duplex_req
+    assert "nemo_toolkit[asr] @ git+https://github.com/NVIDIA-NeMo/Speech.git@ca3f93a516ff172e32951928aea6f96a977a7600" in duplex_req
     assert "protobuf~=5.29.5" in duplex_req
     assert "onnx==1.22.0" in duplex_req
     assert "onnxruntime==1.22.1" in duplex_req

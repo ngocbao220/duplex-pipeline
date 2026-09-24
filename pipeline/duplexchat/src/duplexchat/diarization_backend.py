@@ -288,6 +288,28 @@ def _load_sortformer_pipeline(
             f"Import failed with error: {exc}. Please install: pip install nemo_toolkit[asr]"
         ) from exc
 
+    if is_nemotron:
+        try:
+            from nemo.collections.asr import modules as asr_modules
+            from nemo.collections.asr.modules.transformer_encoder import (
+                TransformerEncoder,
+                _SUPPORTED_SELF_ATTENTION_MODELS,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "Nemotron-3-Diarization requires the NeMo Speech TransformerEncoder with "
+                "feat_in and RoPE support. "
+                "Upgrade the DuplexChat environment from its requirements-duplexchat.txt."
+            ) from exc
+        if "rope" not in _SUPPORTED_SELF_ATTENTION_MODELS:
+            raise RuntimeError(
+                "Nemotron-3-Diarization requires NeMo Speech RoPE support; the installed "
+                "NeMo 3.0.0 release does not include it. Upgrade using requirements-duplexchat.txt."
+            )
+        # The checkpoint targets nemo.collections.asr.modules.TransformerEncoder.
+        if not hasattr(asr_modules, "TransformerEncoder"):
+            asr_modules.TransformerEncoder = TransformerEncoder
+
     def _patch_sortformer_modules():
         """Monkey-patch SortformerModules to filter unknown kwargs like fifo_len, spkcache_len."""
         try:
