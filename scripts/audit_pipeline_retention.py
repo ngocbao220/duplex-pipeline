@@ -38,16 +38,22 @@ def audit(dialogue_root: Path, output_roots: dict[str, Path]) -> tuple[list[dict
         keys.update(indexed)
 
     rows = []
-    summary = {}
-    for name, indexed in outputs.items():
-        paired_seconds = {"dialogue": 0.0, "stereo": 0.0, "all_dialogue": 0.0, "all_stereo": 0.0}
-        counts = {"paired": 0, "missing": 0, "orphan": 0, "shorter": 0, "longer": 0}
-        summary[name] = (paired_seconds, counts)
+    summary = {name: {} for name in outputs}
+
+    def source_summary(name: str, source: str) -> tuple[dict, dict]:
+        if source not in summary[name]:
+            summary[name][source] = (
+                {"dialogue": 0.0, "stereo": 0.0, "all_dialogue": 0.0, "all_stereo": 0.0},
+                {"paired": 0, "missing": 0, "orphan": 0, "shorter": 0, "longer": 0},
+            )
+        return summary[name][source]
 
     for key in sorted(keys, key=lambda item: (str(item[0]), int(item[1]))):
+        source = key[0].parts[0] if key[0].parts else "(root)"
         dialogue = dialogues.get(key)
         dialogue_sec = _audio_seconds(dialogue) if dialogue else None
         row = {
+            "source": source,
             "relative_dir": str(key[0]),
             "index": key[1],
             "dialogue_path": str(dialogue) if dialogue else "",
@@ -64,7 +70,7 @@ def audit(dialogue_root: Path, output_roots: dict[str, Path]) -> tuple[list[dict
                 f"{name}_seconds": stereo_sec,
                 f"{name}_delta_seconds": difference,
             })
-            seconds, counts = summary[name]
+            seconds, counts = source_summary(name, source)
             if dialogue_sec is not None:
                 seconds["all_dialogue"] += dialogue_sec
             if stereo_sec is not None:
@@ -99,7 +105,7 @@ def main() -> None:
         parser.error("all input directories must exist")
 
     rows, summary = audit(args.dialogue_dir, roots)
-    fields = ["relative_dir", "index", "dialogue_path", "dialogue_seconds"]
+    fields = ["source", "relative_dir", "index", "dialogue_path", "dialogue_seconds"]
     for name in roots:
         fields.extend([f"{name}_status", f"{name}_path", f"{name}_seconds", f"{name}_delta_seconds"])
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -109,12 +115,14 @@ def main() -> None:
         writer.writerows(rows)
 
     print(f"Dialogue files: {sum(row['dialogue_path'] != '' for row in rows)}")
-    for name, (seconds, counts) in summary.items():
-        delta = seconds["stereo"] - seconds["dialogue"]
-        print(f"{name}: paired {counts['paired']} | missing {counts['missing']} | orphan {counts['orphan']}")
-        print(f"  All files: dialogue {seconds['all_dialogue'] / 3600:.2f} h | stereo {seconds['all_stereo'] / 3600:.2f} h")
-        print(f"  Paired duration: {seconds['dialogue'] / 3600:.2f} h -> {seconds['stereo'] / 3600:.2f} h ({delta / 3600:+.2f} h)")
-        print(f"  Shorter outputs: {counts['shorter']} | longer outputs: {counts['longer']}")
+    for name, sources in summary.items():
+        print(f"{name}:")
+        for source, (seconds, counts) in sorted(sources.items()):
+            delta = seconds["stereo"] - seconds["dialogue"]
+            print(f"  {source}: paired {counts['paired']} | missing {counts['missing']} | orphan {counts['orphan']}")
+            print(f"    All files: dialogue {seconds['all_dialogue'] / 3600:.2f} h | stereo {seconds['all_stereo'] / 3600:.2f} h")
+            print(f"    Paired duration: {seconds['dialogue'] / 3600:.2f} h -> {seconds['stereo'] / 3600:.2f} h ({delta / 3600:+.2f} h)")
+            print(f"    Shorter outputs: {counts['shorter']} | longer outputs: {counts['longer']}")
     print(f"CSV: {args.output_csv.resolve()}")
 
 
