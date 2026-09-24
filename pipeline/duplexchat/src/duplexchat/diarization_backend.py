@@ -236,6 +236,34 @@ def _resolve_device(device: str) -> str:
     return device if (device != "cuda" or torch.cuda.is_available()) else "cpu"
 
 
+def _patch_pyannote_hf_token_compat() -> None:
+    """Bridge pyannote.audio 3.x auth naming to modern huggingface_hub."""
+    import inspect
+    import sys
+
+    from huggingface_hub import hf_hub_download
+
+    hub_parameters = inspect.signature(hf_hub_download).parameters
+    if "use_auth_token" in hub_parameters or "token" not in hub_parameters:
+        return
+
+    def _hf_hub_download_compat(*args, **kwargs):
+        legacy_token = kwargs.pop("use_auth_token", None)
+        if legacy_token is not None and "token" not in kwargs:
+            kwargs["token"] = legacy_token
+        return hf_hub_download(*args, **kwargs)
+
+    _hf_hub_download_compat._duplex_pyannote_auth_compat = True
+    for module_name in (
+        "pyannote.audio.core.pipeline",
+        "pyannote.audio.core.model",
+        "pyannote.audio.pipelines.speaker_verification",
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None and getattr(module, "hf_hub_download", None) is hf_hub_download:
+            module.hf_hub_download = _hf_hub_download_compat
+
+
 def _load_pyannote_pipeline(model: str, device: str = "cuda") -> "Pipeline":
     enforce_offline_mode()
     local_target, is_dir = resolve_local_model_path(
@@ -249,16 +277,8 @@ def _load_pyannote_pipeline(model: str, device: str = "cuda") -> "Pipeline":
         raise RuntimeError("pyannote.audio is required for diarization") from exc
 
     target_str = str(local_target)
-    try:
-        pipeline = Pipeline.from_pretrained(target_str, use_auth_token=token or False)
-    except TypeError:
-        pipeline = Pipeline.from_pretrained(target_str, token=token or False)
-    except Exception as exc:
-        # Retry with local_files_only=True explicitly if token call failed
-        try:
-            pipeline = Pipeline.from_pretrained(target_str, local_files_only=True)
-        except Exception:
-            raise exc
+    _patch_pyannote_hf_token_compat()
+    pipeline = Pipeline.from_pretrained(target_str, use_auth_token=token or False)
 
     resolved_device = _resolve_device(device)
     pipeline.to(torch.device(resolved_device))
