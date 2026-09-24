@@ -5,7 +5,7 @@ Outputs: Dialogue records suitable for reporting and separation.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -14,6 +14,7 @@ class Dialogue:
     start: float
     end: float
     reason: str = ""
+    split_events: list[str] = field(default_factory=list)
 
     @property
     def duration(self) -> float:
@@ -47,15 +48,16 @@ def split_into_dialogues(segments: list[dict], gap_seconds: float) -> list[Dialo
     return [_dialogue_from_segments(group) for group in groups]
 
 
-def _dialogue_from_segments(segments: list[dict]) -> Dialogue:
+def _dialogue_from_segments(segments: list[dict], split_events: list[str] | None = None) -> Dialogue:
     return Dialogue(
         segments=segments,
         start=min(segment["start"] for segment in segments),
         end=max(segment["end"] for segment in segments),
+        split_events=list(split_events or []),
     )
 
 
-def _two_speaker_runs(segments: list[dict]) -> list[list[dict]]:
+def _two_speaker_runs(segments: list[dict]) -> list[Dialogue]:
     """
     Find all maximal contiguous sub-sequences of turns that involve exactly
     2 distinct speakers. When a 3rd speaker appears, the current run is closed
@@ -64,22 +66,26 @@ def _two_speaker_runs(segments: list[dict]) -> list[list[dict]]:
     if not segments:
         return []
 
-    runs: list[list[dict]] = []
+    runs: list[Dialogue] = []
     current: list[dict] = [segments[0]]
     speakers: set[str] = {segments[0]["speaker"]}
+    split_events: list[str] = []
 
     for seg in segments[1:]:
         if seg["speaker"] in speakers or len(speakers) < 2:
             current.append(seg)
             speakers.add(seg["speaker"])
         else:
+            event = f"{seg['speaker']} entered at {float(seg['start']):.1f}s"
             if len(speakers) == 2:
-                runs.append(current)
+                split_events.append(f"previous two-speaker run ended when {event}")
+                runs.append(_dialogue_from_segments(current, split_events))
             current = [seg]
             speakers = {seg["speaker"]}
+            split_events = [f"run starts after {event}"]
 
     if len(speakers) == 2:
-        runs.append(current)
+        runs.append(_dialogue_from_segments(current, split_events))
 
     return runs
 
@@ -102,23 +108,56 @@ def speaker_time_ratios(dialogue: Dialogue) -> dict[str, float]:
     return {speaker: duration / total for speaker, duration in speaker_duration.items()}
 
 
-def dialogue_filter_summary(segments: list[dict]) -> dict[str, int]:
+def _validate_dialogue_filter_config(
+    gap_seconds: float,
+    min_duration_seconds: float,
+    max_duration_seconds: float,
+    max_single_speaker_ratio: float,
+    preferred_split_pause_seconds: float,
+    min_split_pause_seconds: float,
+) -> None:
+    if gap_seconds < 0:
+        raise ValueError("Dialogue gap must be non-negative")
+    if min_duration_seconds <= 0 or max_duration_seconds < min_duration_seconds:
+        raise ValueError("Dialogue durations must satisfy 0 < minimum <= maximum")
+    if not 0 < max_single_speaker_ratio <= 1:
+        raise ValueError("Maximum single-speaker ratio must be in (0, 1]")
+    _validate_split_pause_thresholds(preferred_split_pause_seconds, min_split_pause_seconds)
+
+
+def _validate_split_pause_thresholds(preferred_split_pause_seconds: float, min_split_pause_seconds: float) -> None:
+    if min_split_pause_seconds <= 0 or preferred_split_pause_seconds < min_split_pause_seconds:
+        raise ValueError("Split-pause thresholds must satisfy 0 < minimum <= preferred")
+
+
+def dialogue_filter_summary(
+    segments: list[dict], *, gap_seconds: float = 5.0,
+    min_duration_seconds: float = 10.0, max_duration_seconds: float = 600.0,
+    max_single_speaker_ratio: float = 0.8,
+    preferred_split_pause_seconds: float = 3.0, min_split_pause_seconds: float = 1.5,
+) -> dict[str, int]:
     """Count the stages and rejection reasons used by conversation filtering."""
-    groups = split_into_dialogues(segments, gap_seconds=5.0)
+    _validate_dialogue_filter_config(
+        gap_seconds, min_duration_seconds, max_duration_seconds, max_single_speaker_ratio,
+        preferred_split_pause_seconds, min_split_pause_seconds,
+    )
+    groups = split_into_dialogues(segments, gap_seconds=gap_seconds)
     two_speaker_runs = [run for group in groups for run in _two_speaker_runs(group.segments)]
     short = 0
     imbalanced = 0
     accepted = 0
-    for run in two_speaker_runs:
-        dialogue = _dialogue_from_segments(run)
-        if dialogue.duration < 10.0:
+    for dialogue in two_speaker_runs:
+        if dialogue.duration < min_duration_seconds:
             short += 1
             continue
-        chunks = _split_long_dialogue(dialogue, 600.0, 10.0)
+        chunks = _split_long_dialogue(
+            dialogue, max_duration_seconds, min_duration_seconds,
+            preferred_split_pause_seconds, min_split_pause_seconds,
+        )
         for chunk in chunks:
-            if chunk.duration < 10.0:
+            if chunk.duration < min_duration_seconds:
                 short += 1
-            elif not is_balanced_dialogue(chunk, 0.8):
+            elif not is_balanced_dialogue(chunk, max_single_speaker_ratio):
                 imbalanced += 1
             else:
                 accepted += 1
@@ -135,22 +174,31 @@ def dialogue_filter_summary(segments: list[dict]) -> dict[str, int]:
 
 def _split_long_dialogue(
     dlg: Dialogue, max_duration: float, min_duration: float,
+    preferred_split_pause: float = 3.0, min_split_pause: float = 1.5,
 ) -> list[Dialogue]:
     """Split only at an internal dual-speaker silence; never crop active speech."""
+    _validate_split_pause_thresholds(preferred_split_pause, min_split_pause)
     if dlg.duration <= max_duration:
         return [dlg]
 
     chunks: list[Dialogue] = []
     remaining = sorted(dlg.segments, key=lambda segment: (segment["start"], segment["end"]))
+    carried_events = list(dlg.split_events)
     while remaining:
-        candidate = _dialogue_from_segments(remaining)
+        candidate = _dialogue_from_segments(remaining, carried_events)
         if candidate.duration <= max_duration:
             chunks.append(candidate)
             break
 
         boundary = _nearest_dual_silence_boundary(
             remaining, target=candidate.start + max_duration, lower_bound=candidate.start,
+            minimum_silence=preferred_split_pause,
         )
+        if boundary is None:
+            boundary = _nearest_dual_silence_boundary(
+                remaining, target=candidate.start + max_duration, lower_bound=candidate.start,
+                minimum_silence=min_split_pause,
+            )
         if boundary is None:
             # A duration cap must not cut a word, utterance, interruption, or overlap.
             chunks.append(candidate)
@@ -162,8 +210,15 @@ def _split_long_dialogue(
         if not left or not right:
             chunks.append(candidate)
             break
-        chunks.append(_dialogue_from_segments(left))
+        pause_type = "preferred" if silence_end - silence_start >= preferred_split_pause else "fallback"
+        split_event = (
+            f"split at {pause_type} pause {silence_start:.1f}-{silence_end:.1f}s "
+            f"({silence_end - silence_start:.1f}s)"
+        )
+        left_chunk = _dialogue_from_segments(left, carried_events + [split_event])
+        chunks.append(left_chunk)
         remaining = right
+        carried_events = carried_events + [split_event]
 
     return chunks
 
@@ -199,20 +254,28 @@ def extract_valid_dialogues(
     max_single_speaker_ratio: float = 0.8,
     min_duration_seconds: float = 10.0,
     max_duration_seconds: float = 600.0,
+    preferred_split_pause_seconds: float = 3.0,
+    min_split_pause_seconds: float = 1.5,
 ) -> list[Dialogue]:
     """
     Split by silence gaps, then within each group extract all maximal 2-speaker
     runs and keep those that pass the dominance and duration filters.
     Dialogues longer than max_duration_seconds are split into chunks.
     """
+    _validate_dialogue_filter_config(
+        gap_seconds, min_duration_seconds, max_duration_seconds, max_single_speaker_ratio,
+        preferred_split_pause_seconds, min_split_pause_seconds,
+    )
     result: list[Dialogue] = []
     for group in split_into_dialogues(segments, gap_seconds):
-        for run in _two_speaker_runs(group.segments):
-            dlg = _dialogue_from_segments(run)
+        for dlg in _two_speaker_runs(group.segments):
             if dlg.duration < min_duration_seconds:
                 continue
             orig_duration = dlg.duration
-            chunks = _split_long_dialogue(dlg, max_duration_seconds, min_duration_seconds)
+            chunks = _split_long_dialogue(
+                dlg, max_duration_seconds, min_duration_seconds,
+                preferred_split_pause_seconds, min_split_pause_seconds,
+            )
             is_split = len(chunks) > 1
             for idx, chunk in enumerate(chunks, 1):
                 if chunk.duration < min_duration_seconds:
@@ -220,15 +283,26 @@ def extract_valid_dialogues(
                 if is_balanced_dialogue(chunk, max_single_speaker_ratio):
                     ratios = speaker_time_ratios(chunk)
                     max_ratio = max(ratios.values()) if ratios else 0.0
-                    if is_split:
+                    split_context = "; ".join(chunk.split_events)
+                    if orig_duration > max_duration_seconds and is_split:
                         chunk.reason = (
-                            f"split_from_long_dialogue (parent_duration={orig_duration:.1f}s, "
-                            f"chunk {idx}/{len(chunks)}, duration={chunk.duration:.1f}s, max_speaker_ratio={max_ratio:.2f})"
+                            f"Original dialogue too long ({orig_duration:.1f}s > "
+                            f"{max_duration_seconds:.1f}s); {split_context}; "
+                            f"chunk {idx}/{len(chunks)} ({chunk.duration:.1f}s); "
+                            f"max speaker share={max_ratio:.0%}"
                         )
+                    elif orig_duration > max_duration_seconds:
+                        chunk.reason = (
+                            f"Original dialogue too long ({orig_duration:.1f}s > "
+                            f"{max_duration_seconds:.1f}s), kept intact because no internal "
+                            f"pause of at least 1.5s was available; {split_context or 'two-speaker run'}"
+                        )
+                    elif split_context:
+                        chunk.reason = f"Two-speaker dialogue; {split_context}"
                     else:
                         chunk.reason = (
-                            f"accepted_standard_2_speaker_dialogue (duration={chunk.duration:.1f}s, "
-                            f"max_speaker_ratio={max_ratio:.2f})"
+                            f"Two-speaker dialogue accepted (duration={chunk.duration:.1f}s, "
+                            f"max speaker share={max_ratio:.0%})"
                         )
                     result.append(chunk)
     return result

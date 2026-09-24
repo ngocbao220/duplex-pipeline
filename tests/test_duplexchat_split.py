@@ -132,7 +132,7 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
     assert (output_root / "manifest.json").is_file()
     assert (output_root / "dialogue_1.wav").is_file()
     assert "reason" in manifest["dialogues"][0]
-    assert "accepted_standard_2_speaker_dialogue" in manifest["dialogues"][0]["reason"]
+    assert "Two-speaker dialogue accepted" in manifest["dialogues"][0]["reason"]
     assert manifest["dialogues"][0]["speaker_turns"] == [
         {"start": 0.0, "end": 6.0, "speaker": "A"},
         {"start": 6.0, "end": 12.0, "speaker": "B"},
@@ -146,6 +146,14 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
     assert manifest["filter_summary"]["candidate_dialogue_count"] == 1
     assert manifest["filter_summary"]["exported_dialogue_count"] == 1
     assert manifest["filter_summary"]["lid"]["enabled"] is False
+    assert manifest["filter_summary"]["dialogue_config"] == {
+        "gap_seconds": 5.0,
+        "min_duration_seconds": 10.0,
+        "max_duration_seconds": 600.0,
+        "max_single_speaker_ratio": 0.8,
+        "preferred_split_pause_seconds": 3.0,
+        "min_split_pause_seconds": 1.5,
+    }
     assert manifest["candidate_dialogues"][0]["decision"] == "exported"
 
 
@@ -181,7 +189,7 @@ def test_split_valid_dialogues_records_each_lid_rejection(monkeypatch, tmp_path)
     rejected = manifest["candidate_dialogues"]
     assert rejected[0]["candidate_index"] == 1
     assert rejected[0]["decision"] == "rejected_by_lid"
-    assert rejected[0]["reason"].startswith("accepted_standard_2_speaker_dialogue")
+    assert rejected[0]["reason"].startswith("Two-speaker dialogue accepted")
 
 
 def test_separate_dialogue_files(monkeypatch, tmp_path):

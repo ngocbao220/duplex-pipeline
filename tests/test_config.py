@@ -140,6 +140,14 @@ def test_dialogue_split_is_decoupled_from_duplexchat():
     assert "music_filter" in split_cfg
     assert "lid" in split_cfg
     assert "dialogue" in split_cfg
+    assert split_cfg["dialogue"] == {
+        "gap_seconds": 5.0,
+        "min_duration_seconds": 10.0,
+        "max_duration_seconds": 600.0,
+        "max_single_speaker_ratio": 0.8,
+        "preferred_split_pause_seconds": 3.0,
+        "min_split_pause_seconds": 1.5,
+    }
 
 
 def test_kaggle_dev_config_paths():

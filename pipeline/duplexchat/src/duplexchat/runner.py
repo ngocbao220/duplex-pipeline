@@ -298,6 +298,12 @@ def split_valid_dialogues(
     lid_model: str = "openai/whisper-small",
     min_vi_prob: float = 0.5,
     debug: bool = False,
+    dialogue_gap_seconds: float = 5.0,
+    min_dialogue_duration_seconds: float = 10.0,
+    max_dialogue_duration_seconds: float = 600.0,
+    max_single_speaker_ratio: float = 0.8,
+    preferred_split_pause_seconds: float = 3.0,
+    min_split_pause_seconds: float = 1.5,
 ) -> dict:
     """Preprocesses audio, diarizes, extracts valid 2-speaker dialogues, applies music filtering, runs Whisper LID for Vietnamese filtering, and saves dialogue WAVs."""
     import json
@@ -350,14 +356,38 @@ def split_valid_dialogues(
             ((segment["start"], segment["end"], segment["speaker"]) for segment in segments),
         )
 
-    summary = dialogue_filter_summary(segments)
-    dialogues = extract_valid_dialogues(segments)
+    summary = dialogue_filter_summary(
+        segments,
+        gap_seconds=dialogue_gap_seconds,
+        min_duration_seconds=min_dialogue_duration_seconds,
+        max_duration_seconds=max_dialogue_duration_seconds,
+        max_single_speaker_ratio=max_single_speaker_ratio,
+        preferred_split_pause_seconds=preferred_split_pause_seconds,
+        min_split_pause_seconds=min_split_pause_seconds,
+    )
+    dialogues = extract_valid_dialogues(
+        segments,
+        gap_seconds=dialogue_gap_seconds,
+        max_single_speaker_ratio=max_single_speaker_ratio,
+        min_duration_seconds=min_dialogue_duration_seconds,
+        max_duration_seconds=max_dialogue_duration_seconds,
+        preferred_split_pause_seconds=preferred_split_pause_seconds,
+        min_split_pause_seconds=min_split_pause_seconds,
+    )
     logger.info("+ Sample: %s", audio_path.name)
     logger.info("+ Duration: %.2fs", audio_duration_sec or 0.0)
+    logger.info(
+        "+ Dialogue rules: gap %.1fs | duration %.1f-%.1fs | max speaker share %.0f%% | split pause %.1f/%.1fs preferred/minimum",
+        dialogue_gap_seconds, min_dialogue_duration_seconds, max_dialogue_duration_seconds,
+        max_single_speaker_ratio * 100, preferred_split_pause_seconds, min_split_pause_seconds,
+    )
     logger.info("+ Found %d clips", len(dialogues))
     logger.info("+ Ignore:")
-    logger.info("++++ %d Imbalance (>80%% single speaker)", summary.get("rejected_imbalanced", 0))
-    logger.info("++++ %d Short (<10s)", summary.get("rejected_short", 0))
+    logger.info(
+        "++++ %d Imbalance (>%.0f%% single speaker)",
+        summary.get("rejected_imbalanced", 0), max_single_speaker_ratio * 100,
+    )
+    logger.info("++++ %d Short (<%.1fs)", summary.get("rejected_short", 0), min_dialogue_duration_seconds)
     if summary.get("speakers", 0) < 2:
         logger.info("++++ %d Monologue (<2 distinct speakers detected by diarization)", 1 if summary.get("speakers", 0) <= 1 else 0)
 
@@ -487,6 +517,14 @@ def split_valid_dialogues(
             "rejected_short": summary.get("rejected_short", 0),
             "rejected_imbalanced": summary.get("rejected_imbalanced", 0),
             "diarized_speaker_count": summary.get("speakers", 0),
+            "dialogue_config": {
+                "gap_seconds": dialogue_gap_seconds,
+                "min_duration_seconds": min_dialogue_duration_seconds,
+                "max_duration_seconds": max_dialogue_duration_seconds,
+                "max_single_speaker_ratio": max_single_speaker_ratio,
+                "preferred_split_pause_seconds": preferred_split_pause_seconds,
+                "min_split_pause_seconds": min_split_pause_seconds,
+            },
             "lid": {
                 "enabled": filter_vietnamese,
                 "model": lid_model if filter_vietnamese else None,

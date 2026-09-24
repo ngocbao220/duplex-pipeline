@@ -65,7 +65,7 @@ Adapter dùng NeMo `SortformerEncLabelModel` và cấu hình Nemotron offline-st
 
 Nemotron cần phiên bản NeMo Speech được pin theo commit NVIDIA hỗ trợ cả `feat_in` và `rope`; các bản PyPI NeMo 2.7.3 và 3.0.0 chưa hỗ trợ đủ cấu hình của checkpoint. Sau khi cập nhật mã nguồn, cài lại dependency trong đúng môi trường DuplexChat bằng `python -m pip install -r requirements-duplexchat.txt`.
 
-Sau batch, xem `split_dialogue_report.json` ngay trong `data.dialogue_dir`: báo cáo ghi LID đang bật hay tắt, model/ngưỡng xác suất, tổng candidate/clip xuất ra, số clip bị loại theo từng lý do, và lý do của mọi audio không tạo được clip. Phần `retention` cho biết tổng giờ audio gốc, số giờ và phần trăm còn lại sau lọc dialogue và sau LID; terminal cũng in phase làm giảm thời lượng nhiều nhất. Các phần trăm retention tính trên tổng audio gốc. Audio không có manifest được tính vào tổng nguồn nhưng không gán phần thời lượng thiếu cho bộ lọc nào; xem `unprocessed_source_hours`. Mỗi `<audio>/manifest.json` có `candidate_dialogues` để truy ngược timestamp và quyết định của từng candidate.
+Sau batch, xem `split_dialogue_report.json` ngay trong `data.dialogue_dir`: báo cáo ghi LID đang bật hay tắt, model/ngưỡng xác suất, cấu hình ngưỡng dialogue thực dùng, tổng candidate/clip xuất ra, số clip bị loại theo từng lý do, và lý do của mọi audio không tạo được clip. Mỗi `<audio>/manifest.json` cũng lưu cấu hình này trong `filter_summary.dialogue_config`; `reason` của từng candidate ghi nguyên nhân chia như speaker mới xuất hiện hoặc dialogue vượt thời lượng tối đa, kèm timestamp/pause được chọn. Phần `retention` cho biết tổng giờ audio gốc, số giờ và phần trăm còn lại sau lọc dialogue và sau LID; terminal cũng in phase làm giảm thời lượng nhiều nhất. Các phần trăm retention tính trên tổng audio gốc. Audio không có manifest được tính vào tổng nguồn nhưng không gán phần thời lượng thiếu cho bộ lọc nào; xem `unprocessed_source_hours`.
 
 ### Bản đồ phân bố transcript
 
@@ -138,6 +138,10 @@ python run_pipeline.py step=benchmark pipeline=sommelier env=sever gpu=0 data.so
 | Tắt LID | `dialogue_split.lid.enabled=false` |
 | Đổi ngôn ngữ LID | `dialogue_split.lid.code=en` |
 | Đổi ngưỡng LID | `dialogue_split.lid.min_prob=0.7` |
+| Đổi khoảng cách tách nhóm theo im lặng | `dialogue_split.dialogue.gap_seconds=5.0` |
+| Đổi thời lượng dialogue tối thiểu/tối đa | `dialogue_split.dialogue.min_duration_seconds=10.0 dialogue_split.dialogue.max_duration_seconds=600.0` |
+| Đổi tỷ lệ nói tối đa của một speaker | `dialogue_split.dialogue.max_single_speaker_ratio=0.8` |
+| Đổi pause chia dialogue dài (ưu tiên/tối thiểu) | `dialogue_split.dialogue.preferred_split_pause_seconds=3.0 dialogue_split.dialogue.min_split_pause_seconds=1.5` |
 | Đổi backend diarization của bước lọc | `dialogue_split.diarization.backend=pyannote` |
 | Đổi model diarization của bước lọc | `dialogue_split.diarization.model=pyannote/speaker-diarization-community-1` |
 | Đặt đường dẫn model | `env.paths.base_models=/path/to/models` |

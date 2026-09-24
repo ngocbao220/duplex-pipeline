@@ -41,16 +41,33 @@ def _available_gpu_count() -> int:
         return 0
 
 
-def _split_dialogue_complete(output: Path) -> bool:
+def _split_dialogue_complete(output: Path, expected_dialogue_config: dict | None = None) -> bool:
     """A split is reusable only after its manifest and every declared WAV exist."""
     try:
         manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
         dialogues = manifest["dialogues"]
+        if expected_dialogue_config is not None:
+            observed = manifest.get("filter_summary", {}).get("dialogue_config")
+            if observed != expected_dialogue_config:
+                return False
         if int(manifest["dialogue_count"]) != len(dialogues):
             return False
         return all((output / row["filename"]).is_file() and (output / row["filename"]).stat().st_size > 0 for row in dialogues)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
         return False
+
+
+def _append_dialogue_config_args(cmd: list[str], config: dict[str, float]) -> None:
+    flags = {
+        "gap_seconds": "--dialogue-gap-seconds",
+        "min_duration_seconds": "--min-dialogue-duration-seconds",
+        "max_duration_seconds": "--max-dialogue-duration-seconds",
+        "max_single_speaker_ratio": "--max-single-speaker-ratio",
+        "preferred_split_pause_seconds": "--preferred-split-pause-seconds",
+        "min_split_pause_seconds": "--min-split-pause-seconds",
+    }
+    for key, flag in flags.items():
+        cmd.extend([flag, str(config[key])])
 
 
 def _duplexchat_complete(dialogue_dir: Path, output: Path) -> bool:
@@ -178,6 +195,7 @@ def _summarize_split_dialogue_manifests(
     output_dir: Path,
     input_audio_count: int,
     input_audio_durations: dict[str, float | None] | None = None,
+    configured_dialogue_config: dict | None = None,
 ) -> dict:
     """Build a filter and duration-retention audit from per-audio manifests."""
     audio = []
@@ -193,6 +211,7 @@ def _summarize_split_dialogue_manifests(
         "zero_dialogue_audio": 0,
     }
     lid_configs = []
+    dialogue_configs: dict[str, dict] = {}
     source_seconds = sum(value for value in (input_audio_durations or {}).values() if value is not None)
     processed_source_seconds = 0.0
     after_dialogue_seconds = 0.0
@@ -216,6 +235,9 @@ def _summarize_split_dialogue_manifests(
 
         lid = summary.get("lid", {})
         lid_configs.append(lid)
+        dialogue_config = summary.get("dialogue_config")
+        if isinstance(dialogue_config, dict):
+            dialogue_configs.setdefault(json.dumps(dialogue_config, sort_keys=True), dialogue_config)
         dialogue_count = int(manifest.get("dialogue_count", 0))
         source_audio = manifest.get("source_audio")
         source_duration = manifest.get("audio_duration_sec")
@@ -309,7 +331,22 @@ def _summarize_split_dialogue_manifests(
         "after_lid": retention_stage(after_lid_seconds, lid_removed_seconds),
         "largest_duration_drop_phase": largest_filter_phase,
     }
-    return {"step": "split_dialogue", "lid": lid, "counts": counts, "retention": retention, "audio": audio}
+    return {
+        "step": "split_dialogue",
+        "lid": lid,
+        "dialogue_filter": {
+            "configured": configured_dialogue_config,
+            "observed_configurations": list(dialogue_configs.values()),
+            "consistent": (
+                bool(dialogue_configs)
+                and len(dialogue_configs) == 1
+                and (configured_dialogue_config is None or next(iter(dialogue_configs.values())) == configured_dialogue_config)
+            ),
+        },
+        "counts": counts,
+        "retention": retention,
+        "audio": audio,
+    }
 
 
 def _write_split_dialogue_report(output_dir: Path, report: dict) -> Path:
@@ -330,6 +367,13 @@ def _print_split_dialogue_summary(report: dict, report_path: Path) -> None:
     print(
         f"LID: {status} | model={lid['model'] or '-'} | "
         f"minimum_vi_probability={lid['min_vi_probability'] if lid['min_vi_probability'] is not None else '-'}"
+    )
+    dialogue_config = report["dialogue_filter"]["configured"] or {}
+    print(
+        "Dialogue rules: group_gap={gap_seconds}s | max_duration={max_duration_seconds}s | "
+        "preferred_pause={preferred_split_pause_seconds}s | "
+        "minimum_pause={min_split_pause_seconds}s | min_duration={min_duration_seconds}s | "
+        "speaker_share_limit={max_single_speaker_ratio:.0%}".format(**dialogue_config)
     )
     print(
         "Audio: {input_audio} input, {manifest_audio} completed manifests, {zero_dialogue_audio} produced 0 clips".format(**counts)
@@ -619,7 +663,21 @@ def run_batch():
                         help="Print executable commands without running them.")
     parser.add_argument("--debug", action="store_true",
                         help="Keep per-audio intermediate files under each output folder's debug directory.")
+    parser.add_argument("--dialogue-gap-seconds", type=float, default=5.0)
+    parser.add_argument("--min-dialogue-duration-seconds", type=float, default=10.0)
+    parser.add_argument("--max-dialogue-duration-seconds", type=float, default=600.0)
+    parser.add_argument("--max-single-speaker-ratio", type=float, default=0.8)
+    parser.add_argument("--preferred-split-pause-seconds", type=float, default=3.0)
+    parser.add_argument("--min-split-pause-seconds", type=float, default=1.5)
     args = parser.parse_args()
+    dialogue_config = {
+        "gap_seconds": args.dialogue_gap_seconds,
+        "min_duration_seconds": args.min_dialogue_duration_seconds,
+        "max_duration_seconds": args.max_dialogue_duration_seconds,
+        "max_single_speaker_ratio": args.max_single_speaker_ratio,
+        "preferred_split_pause_seconds": args.preferred_split_pause_seconds,
+        "min_split_pause_seconds": args.min_split_pause_seconds,
+    }
     workflow_id = os.environ.get("PIPELINE_RUN_ID") or dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     phase_started_at = dt.datetime.now(dt.UTC)
     phase_started = perf_counter()
@@ -731,13 +789,14 @@ def run_batch():
                     cmd.extend(["--diarization-model", args.diarization_model])
                 if args.diarize_chunk:
                     cmd.extend(["--diarize-chunk", str(args.diarize_chunk)])
+                _append_dialogue_config_args(cmd, dialogue_config)
                 print(f"[{idx}/{len(wav_files)}] {gpu_tag}{wav.name} -> {sub_out.name}")
                 print("  Command:", " ".join(cmd))
         else:
             def _process_one_wav(item, target_gpu):
                 idx, wav = item
                 sub_out = output_dir / wav.stem
-                if _split_dialogue_complete(sub_out):
+                if _split_dialogue_complete(sub_out, dialogue_config):
                     print(f"[RESUMED] {wav.name}: complete split output at {sub_out}")
                     return _resumed_timing(wav, sub_out)
                 _archive_incomplete_output(sub_out)
@@ -762,6 +821,7 @@ def run_batch():
                     cmd.extend(["--diarization-model", args.diarization_model])
                 if args.diarize_chunk:
                     cmd.extend(["--diarize-chunk", str(args.diarize_chunk)])
+                _append_dialogue_config_args(cmd, dialogue_config)
                 print(f"[{idx}/{len(wav_files)}] {gpu_tag}{wav.name} -> {sub_out.name}")
                 timing = _timed_subprocess(cmd, wav, sub_out, worker_env)
                 if timing["exit_code"] != 0:
@@ -1063,6 +1123,7 @@ def run_batch():
                 output_dir,
                 input_audio_count=len(wav_files),
                 input_audio_durations=input_audio_durations,
+                configured_dialogue_config=dialogue_config,
             )
             split_report_path = _write_split_dialogue_report(output_dir, split_report)
             _print_split_dialogue_summary(split_report, split_report_path)

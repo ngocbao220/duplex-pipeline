@@ -108,6 +108,22 @@ def test_duplexchat_cli_accepts_diarization_backend_and_model():
     assert args.diarization_model == "nvidia/diar_streaming_sortformer_4spk-v2.1"
 
 
+def test_duplexchat_split_cli_accepts_dialogue_filter_thresholds():
+    args = build_pipeline_parser("duplexchat").parse_args([
+        "split_valid_dialogue", "--input", "source.wav", "--output-dir", "out",
+        "--dialogue-gap-seconds", "4.0", "--min-dialogue-duration-seconds", "8.0",
+        "--max-dialogue-duration-seconds", "500", "--max-single-speaker-ratio", "0.75",
+        "--preferred-split-pause-seconds", "3.5", "--min-split-pause-seconds", "1.5",
+    ])
+
+    assert args.dialogue_gap_seconds == 4.0
+    assert args.min_dialogue_duration_seconds == 8.0
+    assert args.max_dialogue_duration_seconds == 500.0
+    assert args.max_single_speaker_ratio == 0.75
+    assert args.preferred_split_pause_seconds == 3.5
+    assert args.min_split_pause_seconds == 1.5
+
+
 def test_each_pipeline_owns_named_source_modules_with_contract_headers():
     root = Path(__file__).resolve().parents[1]
     expected = {

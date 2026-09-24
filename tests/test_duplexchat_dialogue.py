@@ -34,7 +34,7 @@ def test_overlapping_turn_uses_latest_active_end_for_grouping_and_crop_end():
 def test_long_dialogue_splits_at_dual_silence_near_target():
     dialogue = Dialogue(
         segments=[
-            _segment("A", 0.0, 599.0),
+            _segment("A", 0.0, 596.0),
             _segment("B", 600.0, 601.0),
             _segment("A", 601.0, 900.0),
         ],
@@ -44,7 +44,8 @@ def test_long_dialogue_splits_at_dual_silence_near_target():
 
     chunks = _split_long_dialogue(dialogue, max_duration=600.0, min_duration=10.0)
 
-    assert [(chunk.start, chunk.end) for chunk in chunks] == [(0.0, 599.0), (600.0, 900.0)]
+    assert [(chunk.start, chunk.end) for chunk in chunks] == [(0.0, 596.0), (600.0, 900.0)]
+    assert "preferred pause 596.0-600.0s (4.0s)" in chunks[0].split_events[-1]
 
 
 def test_long_dialogue_is_not_cut_without_a_dual_silence_boundary():
@@ -78,7 +79,7 @@ def test_long_dialogue_expands_the_silence_search_when_target_window_has_none():
 def test_long_dialogue_keeps_a_short_tail_after_a_silence_boundary():
     dialogue = Dialogue(
         segments=[
-            _segment("A", 0.0, 599.5),
+            _segment("A", 0.0, 598.0),
             _segment("B", 600.0, 605.0),
         ],
         start=0.0,
@@ -87,20 +88,21 @@ def test_long_dialogue_keeps_a_short_tail_after_a_silence_boundary():
 
     chunks = _split_long_dialogue(dialogue, max_duration=600.0, min_duration=10.0)
 
-    assert [(chunk.start, chunk.end) for chunk in chunks] == [(0.0, 599.5), (600.0, 605.0)]
+    assert [(chunk.start, chunk.end) for chunk in chunks] == [(0.0, 598.0), (600.0, 605.0)]
+    assert "fallback pause 598.0-600.0s (2.0s)" in chunks[0].split_events[-1]
 
 
 def test_valid_dialogues_drop_short_chunks_created_by_long_split():
     segments = [
         _segment("A", 0.0, 300.0),
-        _segment("B", 300.0, 599.5),
+        _segment("B", 300.0, 598.0),
         _segment("A", 600.0, 602.0),
         _segment("B", 602.0, 605.0),
     ]
 
     dialogues = extract_valid_dialogues(segments)
 
-    assert [(dialogue.start, dialogue.end) for dialogue in dialogues] == [(0.0, 599.5)]
+    assert [(dialogue.start, dialogue.end) for dialogue in dialogues] == [(0.0, 598.0)]
 
 
 class _MeanEmbeddingExtractor:
@@ -182,18 +184,69 @@ def test_extract_valid_dialogues_includes_reason():
     ]
     dialogues_std = extract_valid_dialogues(segments_standard)
     assert len(dialogues_std) == 1
-    assert "accepted_standard_2_speaker_dialogue" in dialogues_std[0].reason
+    assert "Two-speaker dialogue accepted" in dialogues_std[0].reason
 
     segments_long = [
         _segment("A", 0.0, 300.0),
-        _segment("B", 300.0, 599.0),
+        _segment("B", 300.0, 596.0),
         _segment("A", 600.0, 900.0),
         _segment("B", 900.0, 1200.0),
     ]
     dialogues_long = extract_valid_dialogues(segments_long, max_duration_seconds=600.0)
     assert len(dialogues_long) == 2
-    assert "split_from_long_dialogue" in dialogues_long[0].reason
+    assert "Original dialogue too long (1200.0s > 600.0s)" in dialogues_long[0].reason
+    assert "preferred pause 596.0-600.0s (4.0s)" in dialogues_long[0].reason
     assert "chunk 1/2" in dialogues_long[0].reason
-    assert "split_from_long_dialogue" in dialogues_long[1].reason
     assert "chunk 2/2" in dialogues_long[1].reason
 
+
+def test_third_speaker_split_reason_includes_label_and_absolute_entry_time():
+    segments = [
+        _segment("speaker_1", 0.0, 6.0),
+        _segment("speaker_2", 6.0, 12.0),
+        _segment("speaker_3", 13.0, 20.0),
+        _segment("speaker_1", 20.0, 26.0),
+        _segment("speaker_2", 27.0, 33.0),
+    ]
+
+    dialogues = extract_valid_dialogues(segments)
+
+    assert len(dialogues) == 2
+    assert "speaker_3 entered at 13.0s" in dialogues[0].reason
+    assert "run starts after speaker_3 entered at 13.0s" in dialogues[1].reason
+
+
+def test_overlong_dialogue_without_15s_pause_is_kept_with_reason():
+    segments = [_segment("A", 0.0, 700.0), _segment("B", 701.49, 1_300.0)]
+
+    dialogues = extract_valid_dialogues(segments)
+
+    assert len(dialogues) == 1
+    assert "kept intact" in dialogues[0].reason
+    assert "no internal pause of at least 1.5s" in dialogues[0].reason
+
+
+def test_split_pause_thresholds_are_configurable():
+    dialogue = Dialogue(
+        segments=[_segment("A", 0.0, 596.0), _segment("B", 600.0, 900.0)],
+        start=0.0,
+        end=900.0,
+    )
+
+    chunks = _split_long_dialogue(
+        dialogue, max_duration=600.0, min_duration=10.0,
+        preferred_split_pause=5.0, min_split_pause=2.0,
+    )
+
+    assert [(chunk.start, chunk.end) for chunk in chunks] == [(0.0, 596.0), (600.0, 900.0)]
+
+
+def test_split_pause_thresholds_reject_invalid_order():
+    dialogue = Dialogue(segments=[_segment("A", 0.0, 700.0)], start=0.0, end=700.0)
+
+    try:
+        _split_long_dialogue(dialogue, 600.0, 10.0, preferred_split_pause=1.0, min_split_pause=1.5)
+    except ValueError as exc:
+        assert "minimum <= preferred" in str(exc)
+    else:
+        raise AssertionError("invalid pause thresholds should fail fast")

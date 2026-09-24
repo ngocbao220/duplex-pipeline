@@ -229,6 +229,9 @@ def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(m
         commands.append(command)
         worker_output = Path(command[command.index("--output-dir") + 1])
         worker_output.mkdir(parents=True)
+        def option_value(flag):
+            return float(command[command.index(flag) + 1])
+
         (worker_output / "manifest.json").write_text(json.dumps({
             "source_audio": str(source),
             "dialogue_count": 0,
@@ -243,6 +246,14 @@ def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(m
                 "rejected_short": 0,
                 "rejected_imbalanced": 0,
                 "diarized_speaker_count": 2,
+                "dialogue_config": {
+                    "gap_seconds": option_value("--dialogue-gap-seconds"),
+                    "min_duration_seconds": option_value("--min-dialogue-duration-seconds"),
+                    "max_duration_seconds": option_value("--max-dialogue-duration-seconds"),
+                    "max_single_speaker_ratio": option_value("--max-single-speaker-ratio"),
+                    "preferred_split_pause_seconds": option_value("--preferred-split-pause-seconds"),
+                    "min_split_pause_seconds": option_value("--min-split-pause-seconds"),
+                },
                 "lid": {"enabled": True, "model": "local-whisper", "min_vi_probability": 0.7},
             },
         }), encoding="utf-8")
@@ -254,6 +265,7 @@ def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(m
     monkeypatch.setattr(sys, "argv", [
         "run_pipeline_batch.py", "--step", "split_dialogue", "--input-dir", str(raw_dir),
         "--output-dir", str(output_dir), "--lid", "vi", "--min-lid-prob", "0.7",
+        "--preferred-split-pause-seconds", "4", "--min-split-pause-seconds", "2",
     ])
 
     batch.run_batch()
@@ -262,6 +274,9 @@ def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(m
     assert ["--lid", "vi", "--min-lid-prob", "0.7"] == command[command.index("--lid"):command.index("--lid") + 4]
     report = json.loads((output_dir / "split_dialogue_report.json").read_text())
     assert report["lid"] == {"enabled": True, "model": "local-whisper", "min_vi_probability": 0.7}
+    assert report["dialogue_filter"]["consistent"] is True
+    assert report["dialogue_filter"]["configured"]["preferred_split_pause_seconds"] == 4.0
+    assert report["dialogue_filter"]["configured"]["min_split_pause_seconds"] == 2.0
     assert report["counts"]["rejected_by_lid"] == 1
     assert report["retention"]["source_hours"] == 10 / 3600
     assert report["retention"]["after_dialogue"]["hours"] == 8 / 3600
@@ -342,6 +357,12 @@ def test_resume_helpers_only_accept_complete_phase_artifacts(tmp_path):
     assert not batch._split_dialogue_complete(split_out)
     (split_out / "dialogue_1.wav").write_bytes(b"audio")
     assert batch._split_dialogue_complete(split_out)
+    expected = {"min_split_pause_seconds": 1.5}
+    manifest = json.loads((split_out / "manifest.json").read_text())
+    manifest["filter_summary"] = {"dialogue_config": expected}
+    (split_out / "manifest.json").write_text(json.dumps(manifest))
+    assert batch._split_dialogue_complete(split_out, expected)
+    assert not batch._split_dialogue_complete(split_out, {"min_split_pause_seconds": 2.0})
 
     dialogue_dir = tmp_path / "dialogues"
     dialogue_dir.mkdir()

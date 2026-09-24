@@ -16,7 +16,9 @@ lid:
   min_prob: 0.5
 
 dialogue:
-  min_duration: 2.0
-  max_duration: 120.0
-  max_speakers: 2
-  imbalance_ratio_threshold: 4.0
+  gap_seconds: 5.0
+  min_duration_seconds: 10.0
+  max_duration_seconds: 600.0
+  max_single_speaker_ratio: 0.8
+  preferred_split_pause_seconds: 3.0
+  min_split_pause_seconds: 1.5

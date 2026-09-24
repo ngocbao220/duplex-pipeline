@@ -197,7 +197,16 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         if max_chunk is not None:
             cmd.extend(["--diarize-chunk", str(max_chunk)])
 
-
+    dialogue_cfg = split_cfg.get("dialogue", {})
+    for config_key, flag, default in (
+        ("gap_seconds", "--dialogue-gap-seconds", 5.0),
+        ("min_duration_seconds", "--min-dialogue-duration-seconds", 10.0),
+        ("max_duration_seconds", "--max-dialogue-duration-seconds", 600.0),
+        ("max_single_speaker_ratio", "--max-single-speaker-ratio", 0.8),
+        ("preferred_split_pause_seconds", "--preferred-split-pause-seconds", 3.0),
+        ("min_split_pause_seconds", "--min-split-pause-seconds", 1.5),
+    ):
+        cmd.extend([flag, str(dialogue_cfg.get(config_key, default))])
 
     # Music filtering
     music_filter_enabled = split_cfg.get("music_filter", {}).get("enabled", True)

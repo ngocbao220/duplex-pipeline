@@ -45,6 +45,12 @@ def build_pipeline_parser(name: str) -> argparse.ArgumentParser:
         split.add_argument("--min-vi-prob", "--min-lid-prob", dest="min_vi_prob", type=float, default=0.5, help="Minimum language probability threshold")
         split.add_argument("--diarization-backend", type=str, default=None)
         split.add_argument("--diarization-model", type=str, default=None)
+        split.add_argument("--dialogue-gap-seconds", type=float, default=5.0)
+        split.add_argument("--min-dialogue-duration-seconds", type=float, default=10.0)
+        split.add_argument("--max-dialogue-duration-seconds", type=float, default=600.0)
+        split.add_argument("--max-single-speaker-ratio", type=float, default=0.8)
+        split.add_argument("--preferred-split-pause-seconds", type=float, default=3.0)
+        split.add_argument("--min-split-pause-seconds", type=float, default=1.5)
 
         sep = commands.add_parser("separate_dialogue", help="Run DialogueSidon separation on extracted dialogue files.")
         sep.add_argument("--input", type=Path, required=True)
@@ -101,6 +107,12 @@ def run_pipeline_command(name: str, argv: list[str] | None = None) -> int:
             lid_model=getattr(args, "lid_model", "openai/whisper-small"),
             min_vi_prob=getattr(args, "min_vi_prob", 0.5),
             debug=getattr(args, "debug", False),
+            dialogue_gap_seconds=args.dialogue_gap_seconds,
+            min_dialogue_duration_seconds=args.min_dialogue_duration_seconds,
+            max_dialogue_duration_seconds=args.max_dialogue_duration_seconds,
+            max_single_speaker_ratio=args.max_single_speaker_ratio,
+            preferred_split_pause_seconds=args.preferred_split_pause_seconds,
+            min_split_pause_seconds=args.min_split_pause_seconds,
         )
         print(f"Done split_valid_dialogue\n-> Output: {args.output_dir}\n-> Dialogue count: {result['dialogue_count']}", flush=True)
         return 0
