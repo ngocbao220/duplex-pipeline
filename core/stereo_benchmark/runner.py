@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -120,14 +121,18 @@ def run_benchmark(audio_path: Path, output_dir: Path, device: str = "auto", debu
 
 
 def discover_corpus_audio(corpus_dir: Path) -> list[Path]:
-    """Recursively find audio candidates; only stereo files are eligible."""
+    """Find stereo audio candidates, excluding intermediate files under .runs."""
     root = Path(corpus_dir)
     if not root.is_dir():
         raise NotADirectoryError(f"Corpus directory does not exist: {root}")
     
     candidates = []
-    for path in root.rglob("*"):
-        if path.is_file() and path.suffix.lower() in SUPPORTED_AUDIO_SUFFIXES:
+    for current_root, directories, filenames in os.walk(root):
+        directories[:] = [name for name in directories if name != ".runs"]
+        for filename in filenames:
+            path = Path(current_root) / filename
+            if path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
+                continue
             try:
                 import soundfile as sf
                 if sf.info(path).channels == 2:

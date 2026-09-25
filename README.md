@@ -113,7 +113,7 @@ python run_pipeline.py step=cholimex pipeline=cholimex env=sever gpu=0 data.sour
 
 Đánh giá đầu ra stereo:
 
-Mỗi lần chạy benchmark corpus sẽ bốc ngẫu nhiên tối đa 600 file stereo đủ điều kiện; báo cáo lưu danh sách file đã chọn.
+Mỗi lần chạy benchmark corpus sẽ bốc ngẫu nhiên tối đa 600 file stereo đủ điều kiện; bỏ qua thư mục `.runs` và lưu danh sách file đã chọn vào báo cáo.
 
 ```text
 python run_pipeline.py step=benchmark pipeline=duplexchat env=sever gpu=0 data.source=youtube optimization.workers=4 benchmark.check_models=true

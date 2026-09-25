@@ -493,6 +493,9 @@ def test_corpus_discovery_recurses_over_supported_audio_files(tmp_path):
     _stereo = tmp_path / "nested" / "audio.stereo.wav"
     _stereo.parent.mkdir()
     sf.write(_stereo, np.zeros((160, 2)), 16000)
+    run_stereo = tmp_path / "youtube_41" / ".runs" / "dialogue_15" / "stereo_15.wav"
+    run_stereo.parent.mkdir(parents=True)
+    sf.write(run_stereo, np.zeros((160, 2)), 16000)
     (tmp_path / "notes.txt").write_text("not audio")
 
     assert discover_corpus_audio(tmp_path) == [_stereo]
