@@ -76,13 +76,13 @@ def _two_speaker_runs(segments: list[dict]) -> list[Dialogue]:
             current.append(seg)
             speakers.add(seg["speaker"])
         else:
-            event = f"{seg['speaker']} entered at {float(seg['start']):.1f}s"
+            event = f"third speaker label {seg['speaker']} at {float(seg['start']):.1f}s"
             if len(speakers) == 2:
-                split_events.append(f"previous two-speaker run ended when {event}")
+                split_events.append(f"Detected {event}")
                 runs.append(_dialogue_from_segments(current, split_events))
             current = [seg]
             speakers = {seg["speaker"]}
-            split_events = [f"run starts after {event}"]
+            split_events = [f"Run resumes after {event}"]
 
     if len(speakers) == 2:
         runs.append(_dialogue_from_segments(current, split_events))

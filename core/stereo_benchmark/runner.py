@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ from .report import RunningSummary, flatten_report, render_tables, summarize_rep
 
 
 SUPPORTED_AUDIO_SUFFIXES = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
+CORPUS_SAMPLE_LIMIT = 600
 
 
 def resolve_device(requested: str) -> str:
@@ -143,12 +145,13 @@ def run_corpus_benchmark(
     dnsmos_model_dir: Path | None = Path("models/dnsmos"),
     workers: int = 2,
 ) -> tuple[dict, Path]:
-    """Benchmark all audio candidates, retaining per-file failures instead of aborting a corpus."""
+    """Randomly benchmark up to 600 audio candidates, retaining per-file failures."""
     if workers < 1:
         raise ValueError("Stereo benchmark requires workers >= 1")
     started = perf_counter()
     corpus_dir, output_dir = Path(corpus_dir), Path(output_dir)
     candidates = discover_corpus_audio(corpus_dir)
+    selected_candidates = sorted(random.sample(candidates, min(len(candidates), CORPUS_SAMPLE_LIMIT)))
     output_dir.mkdir(parents=True, exist_ok=True)
     running_summary = RunningSummary()
     results = {}
@@ -161,8 +164,11 @@ def run_corpus_benchmark(
         return {
             "input": str(corpus_dir.resolve()),
             "candidate_count": len(candidates),
+            "selected_count": len(selected_candidates),
+            "sample_limit": CORPUS_SAMPLE_LIMIT,
+            "selected_sources": [str(path.relative_to(corpus_dir)) for path in selected_candidates],
             "completed_count": len(results),
-            "status": "complete" if len(results) == len(candidates) else "running",
+            "status": "complete" if len(results) == len(selected_candidates) else "running",
             "summary": running_summary.snapshot(),
             "samples": [item[1] for item in ordered],
             "runtime": {"total_seconds": elapsed, "files_per_second": len(results) / elapsed if elapsed else None},
@@ -189,12 +195,12 @@ def run_corpus_benchmark(
             row_entry = {"source": source, "status": "failed", "error": message}
             return None, sample_entry, row_entry
 
-    indexed_candidates = list(enumerate(candidates))
+    indexed_candidates = list(enumerate(selected_candidates))
     write_json_atomic(report_path, snapshot())
     if workers > 1 and len(indexed_candidates) > 1:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_benchmark_candidate, item): item[0] for item in indexed_candidates}
-            for future in tqdm.tqdm(as_completed(futures), total=len(candidates), desc="Benchmarking files"):
+            for future in tqdm.tqdm(as_completed(futures), total=len(selected_candidates), desc="Benchmarking files"):
                 record(futures[future], future.result())
     else:
         for item in tqdm.tqdm(indexed_candidates, desc="Benchmarking files"):

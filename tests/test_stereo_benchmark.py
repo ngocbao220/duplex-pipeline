@@ -466,6 +466,29 @@ def test_corpus_progress_counts_failures_without_averaging_them(monkeypatch, tmp
     assert json.loads(report_path.read_text()) == result
 
 
+def test_corpus_benchmark_randomly_selects_at_most_600_files(monkeypatch, tmp_path):
+    import core.stereo_benchmark.runner as runner
+
+    candidates = [tmp_path / f"audio_{index:04d}.wav" for index in range(605)]
+    monkeypatch.setattr(runner, "discover_corpus_audio", lambda _corpus: candidates)
+    processed = []
+
+    def fake_benchmark(audio_path, file_dir, *_args):
+        processed.append(audio_path)
+        return {"input": {"duration_sec": 1.0}}, file_dir / "report.json"
+
+    monkeypatch.setattr(runner, "run_benchmark", fake_benchmark)
+    report, _ = runner.run_corpus_benchmark(tmp_path, tmp_path / "out", workers=1)
+
+    assert len(processed) == 600
+    assert len(set(processed)) == 600
+    assert report["candidate_count"] == 605
+    assert report["selected_count"] == 600
+    assert report["sample_limit"] == 600
+    assert set(report["selected_sources"]) == {path.name for path in processed}
+    assert report["completed_count"] == 600
+
+
 def test_corpus_discovery_recurses_over_supported_audio_files(tmp_path):
     _stereo = tmp_path / "nested" / "audio.stereo.wav"
     _stereo.parent.mkdir()

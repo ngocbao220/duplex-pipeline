@@ -65,7 +65,7 @@ Adapter dùng NeMo `SortformerEncLabelModel` và cấu hình Nemotron offline-st
 
 Nemotron cần phiên bản NeMo Speech được pin theo commit NVIDIA hỗ trợ cả `feat_in` và `rope`; các bản PyPI NeMo 2.7.3 và 3.0.0 chưa hỗ trợ đủ cấu hình của checkpoint. Sau khi cập nhật mã nguồn, cài lại dependency trong đúng môi trường DuplexChat bằng `python -m pip install -r requirements-duplexchat.txt`.
 
-Sau batch, xem `split_dialogue_report.json` ngay trong `data.dialogue_dir`: báo cáo ghi LID đang bật hay tắt, model/ngưỡng xác suất, cấu hình ngưỡng dialogue thực dùng, tổng candidate/clip xuất ra, số clip bị loại theo từng lý do, và lý do của mọi audio không tạo được clip. Mỗi `<audio>/manifest.json` cũng lưu cấu hình này trong `filter_summary.dialogue_config`; `reason` của từng candidate ghi nguyên nhân chia như speaker mới xuất hiện hoặc dialogue vượt thời lượng tối đa, kèm timestamp/pause được chọn. Phần `retention` cho biết tổng giờ audio gốc, số giờ và phần trăm còn lại sau lọc dialogue và sau LID; terminal cũng in phase làm giảm thời lượng nhiều nhất. Các phần trăm retention tính trên tổng audio gốc. Audio không có manifest được tính vào tổng nguồn nhưng không gán phần thời lượng thiếu cho bộ lọc nào; xem `unprocessed_source_hours`.
+Sau batch, xem `split_dialogue_report.json` ngay trong `data.dialogue_dir`: báo cáo ghi LID đang bật hay tắt, model/ngưỡng xác suất, cấu hình ngưỡng dialogue thực dùng, tổng candidate/clip xuất ra, số clip bị loại theo từng lý do, và lý do của mọi audio không tạo được clip. Mỗi `<audio>/manifest.json` cũng lưu cấu hình này trong `filter_summary.dialogue_config`; `reason` ghi rõ nếu đoạn bị chia vì xuất hiện nhãn diarization thứ ba, với nhãn và timestamp. Đây là ranh giới theo nhãn speaker, không khẳng định câu nói đã kết thúc hay được quyết định bởi khoảng pause; diarization có thể gán nhầm một người thành nhãn mới. Với dialogue quá dài, reason ghi thời lượng gốc cùng khoảng pause được chọn. Phần `retention` cho biết tổng giờ audio gốc, số giờ và phần trăm còn lại sau lọc dialogue và sau LID; terminal cũng in phase làm giảm thời lượng nhiều nhất. Các phần trăm retention tính trên tổng audio gốc. Audio không có manifest được tính vào tổng nguồn nhưng không gán phần thời lượng thiếu cho bộ lọc nào; xem `unprocessed_source_hours`.
 
 ### Bản đồ phân bố transcript
 
@@ -112,6 +112,8 @@ python run_pipeline.py step=cholimex pipeline=cholimex env=sever gpu=0 data.sour
 ```
 
 Đánh giá đầu ra stereo:
+
+Mỗi lần chạy benchmark corpus sẽ bốc ngẫu nhiên tối đa 600 file stereo đủ điều kiện; báo cáo lưu danh sách file đã chọn.
 
 ```text
 python run_pipeline.py step=benchmark pipeline=duplexchat env=sever gpu=0 data.source=youtube optimization.workers=4 benchmark.check_models=true

@@ -525,6 +525,7 @@ def split_valid_dialogues(
                 "preferred_split_pause_seconds": preferred_split_pause_seconds,
                 "min_split_pause_seconds": min_split_pause_seconds,
             },
+            "reason_format_version": 2,
             "lid": {
                 "enabled": filter_vietnamese,
                 "model": lid_model if filter_vietnamese else None,

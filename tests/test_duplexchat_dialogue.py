@@ -212,8 +212,8 @@ def test_third_speaker_split_reason_includes_label_and_absolute_entry_time():
     dialogues = extract_valid_dialogues(segments)
 
     assert len(dialogues) == 2
-    assert "speaker_3 entered at 13.0s" in dialogues[0].reason
-    assert "run starts after speaker_3 entered at 13.0s" in dialogues[1].reason
+    assert "Detected third speaker label speaker_3 at 13.0s" in dialogues[0].reason
+    assert "Run resumes after third speaker label speaker_3 at 13.0s" in dialogues[1].reason
 
 
 def test_overlong_dialogue_without_15s_pause_is_kept_with_reason():

@@ -47,8 +47,9 @@ def _split_dialogue_complete(output: Path, expected_dialogue_config: dict | None
         manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
         dialogues = manifest["dialogues"]
         if expected_dialogue_config is not None:
-            observed = manifest.get("filter_summary", {}).get("dialogue_config")
-            if observed != expected_dialogue_config:
+            filter_summary = manifest.get("filter_summary", {})
+            observed = filter_summary.get("dialogue_config")
+            if observed != expected_dialogue_config or filter_summary.get("reason_format_version") != 2:
                 return False
         if int(manifest["dialogue_count"]) != len(dialogues):
             return False

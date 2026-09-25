@@ -70,7 +70,11 @@ def main() -> None:
         except StopIteration:
             pass
 
-        print(f"\nCandidates: {report['candidate_count']} | Successful: {report['summary']['sample_count']}\nJSON report: {report_path}")
+        print(
+            f"\nCandidates: {report['candidate_count']} | Selected: {report['selected_count']}"
+            f"/{report['sample_limit']} | Successful: {report['summary']['sample_count']}"
+            f"\nJSON report: {report_path}"
+        )
 
 
 if __name__ == "__main__":

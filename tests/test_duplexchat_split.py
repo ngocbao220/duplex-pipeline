@@ -154,6 +154,7 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
         "preferred_split_pause_seconds": 3.0,
         "min_split_pause_seconds": 1.5,
     }
+    assert manifest["filter_summary"]["reason_format_version"] == 2
     assert manifest["candidate_dialogues"][0]["decision"] == "exported"
 
 

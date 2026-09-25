@@ -359,9 +359,12 @@ def test_resume_helpers_only_accept_complete_phase_artifacts(tmp_path):
     assert batch._split_dialogue_complete(split_out)
     expected = {"min_split_pause_seconds": 1.5}
     manifest = json.loads((split_out / "manifest.json").read_text())
-    manifest["filter_summary"] = {"dialogue_config": expected}
+    manifest["filter_summary"] = {"dialogue_config": expected, "reason_format_version": 2}
     (split_out / "manifest.json").write_text(json.dumps(manifest))
     assert batch._split_dialogue_complete(split_out, expected)
+    manifest["filter_summary"]["reason_format_version"] = 1
+    (split_out / "manifest.json").write_text(json.dumps(manifest))
+    assert not batch._split_dialogue_complete(split_out, expected)
     assert not batch._split_dialogue_complete(split_out, {"min_split_pause_seconds": 2.0})
 
     dialogue_dir = tmp_path / "dialogues"
