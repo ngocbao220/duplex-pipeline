@@ -30,6 +30,7 @@ packaging==24.2
 omegaconf
 hydra-core
 pytorch-lightning
+numba>=0.59.0,<0.66.0
 transformers~=4.57.0
 nemo_toolkit[asr] @ git+https://github.com/NVIDIA-NeMo/Speech.git@ca3f93a516ff172e32951928aea6f96a977a7600
 protobuf~=5.29.5

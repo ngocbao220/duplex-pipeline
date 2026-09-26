@@ -54,6 +54,21 @@ def _suppress_nemo_logs() -> None:
     ):
         logging.getLogger(name).setLevel(logging.ERROR)
 
+
+def _patch_numba_cuda_types() -> None:
+    """Hotfix compatibility issue with numba >= 0.66.0 where numba.cuda.types lacks NPDatetime/NPTimedelta."""
+    try:
+        import numba.types as ntypes
+        import numba.cuda.types as nc_types
+
+        for attr in ("NPDatetime", "NPTimedelta"):
+            if not hasattr(nc_types, attr) and hasattr(ntypes, attr):
+                setattr(nc_types, attr, getattr(ntypes, attr))
+    except Exception:
+        pass
+
+
+_patch_numba_cuda_types()
 _suppress_nemo_logs()
 
 
@@ -311,6 +326,7 @@ def _load_sortformer_pipeline(
         model, env_var=model_env_var, default_subpath=model_subpath
     )
     _suppress_nemo_logs()
+    _patch_numba_cuda_types()
 
     try:
         from nemo.collections.asr.models import SortformerEncLabelModel

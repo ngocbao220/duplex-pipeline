@@ -91,9 +91,17 @@ try:
 except (ImportError, ModuleNotFoundError):
     whisper_asr = None
 import time
-import datetime
 from panns_inference import AudioTagging
 import soundfile as sf
+
+try:
+    import numba.types as _ntypes
+    import numba.cuda.types as _nc_types
+    for _attr in ("NPDatetime", "NPTimedelta"):
+        if not hasattr(_nc_types, _attr) and hasattr(_ntypes, _attr):
+            setattr(_nc_types, _attr, getattr(_ntypes, _attr))
+except Exception:
+    pass
 
 from nemo.collections.asr.models import SortformerEncLabelModel
 
