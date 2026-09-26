@@ -15,7 +15,12 @@ import wave
 import torch
 
 from core.orchestration.logging_style import StepTimer, get_logger, section
-from core.outputs import write_label_file
+from core.outputs import (
+    turns_from_diarization,
+    vad_segments_from_diarization,
+    write_json,
+    write_label_file,
+)
 
 from .audio import load_wav_tensor
 from .devices import resolve_device, validate_multi_gpu
@@ -350,10 +355,36 @@ def split_valid_dialogues(
     phase_times["diarization"] = timer.elapsed
     _release(diarizer)
 
+    # Save speakers, VAD and json for the entire audio by default
+    source_vad_segments = vad_segments_from_diarization(segments, duration_sec=audio_duration_sec)
+    source_turns = turns_from_diarization(segments)
+    write_label_file(
+        output_root / "speakers.txt",
+        ((segment["start"], segment["end"], segment["speaker"]) for segment in segments),
+    )
+    write_label_file(
+        output_root / "vad.txt",
+        ((segment["start"], segment["end"], segment.get("label", "speech")) for segment in source_vad_segments),
+    )
+    write_json(
+        output_root / "diarization.json",
+        {
+            "audio_path": str(audio_path),
+            "duration_sec": audio_duration_sec,
+            "segments": segments,
+            "turns": source_turns,
+            "vad_segments": source_vad_segments,
+        },
+    )
+
     if debug:
         write_label_file(
             phase_dir / "phase_02_diarization" / "speakers.txt",
             ((segment["start"], segment["end"], segment["speaker"]) for segment in segments),
+        )
+        write_label_file(
+            phase_dir / "phase_02_diarization" / "vad.txt",
+            ((segment["start"], segment["end"], segment.get("label", "speech")) for segment in source_vad_segments),
         )
 
     summary = dialogue_filter_summary(
@@ -442,6 +473,44 @@ def split_valid_dialogues(
         out_wav_path = output_root / dialogue_filename
         write_wav(out_wav_path, crop.squeeze(0).cpu().numpy(), sample_rate)
 
+        dialogue_segments = [
+            {
+                "start": round(max(float(segment["start"]), dialogue.start) - dialogue.start, 6),
+                "end": round(min(float(segment["end"]), dialogue.end) - dialogue.start, 6),
+                "speaker": str(segment["speaker"]),
+            }
+            for segment in dialogue.segments
+            if float(segment["end"]) > dialogue.start and float(segment["start"]) < dialogue.end
+        ]
+        dialogue_duration = dialogue.end - dialogue.start
+        dialogue_vad = vad_segments_from_diarization(dialogue_segments, duration_sec=dialogue_duration)
+        dialogue_turns = turns_from_diarization(dialogue_segments)
+
+        # Write per-dialogue label files (txt) and structured metadata (json)
+        write_label_file(
+            output_root / f"speakers_{output_dialogue_idx}.txt",
+            ((seg["start"], seg["end"], seg["speaker"]) for seg in dialogue_segments),
+        )
+        write_label_file(
+            output_root / f"vad_{output_dialogue_idx}.txt",
+            ((seg["start"], seg["end"], seg.get("label", "speech")) for seg in dialogue_vad),
+        )
+        write_json(
+            output_root / f"dialogue_{output_dialogue_idx}.json",
+            {
+                "index": output_dialogue_idx,
+                "audio_file": dialogue_filename,
+                "start_in_source": dialogue.start,
+                "end_in_source": dialogue.end,
+                "duration": dialogue_duration,
+                "vietnamese_probability": round(vi_prob, 4),
+                "reason": dialogue.reason,
+                "segments": dialogue_segments,
+                "turns": dialogue_turns,
+                "vad_segments": dialogue_vad,
+            },
+        )
+
         dialogue_info.append({
             "index": output_dialogue_idx,
             "filename": dialogue_filename,
@@ -451,15 +520,9 @@ def split_valid_dialogues(
             "duration": dialogue.end - dialogue.start,
             "vietnamese_probability": round(vi_prob, 4),
             "reason": dialogue.reason,
-            "speaker_turns": [
-                {
-                    "start": round(max(float(segment["start"]), dialogue.start) - dialogue.start, 6),
-                    "end": round(min(float(segment["end"]), dialogue.end) - dialogue.start, 6),
-                    "speaker": str(segment["speaker"]),
-                }
-                for segment in dialogue.segments
-                if float(segment["end"]) > dialogue.start and float(segment["start"]) < dialogue.end
-            ],
+            "speaker_turns": dialogue_turns,
+            "speaker_segments": dialogue_segments,
+            "vad_segments": dialogue_vad,
         })
         candidate_dialogues.append({
             "candidate_index": index + 1,

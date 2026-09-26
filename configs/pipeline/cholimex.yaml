@@ -13,6 +13,6 @@ cosine_similarity_threshold: 0.5
 overlap_padding: 0.1
 proposal_backend: dialoguesidon
 proposal_model: ${env.paths.dialoguesidon}
-overlap_separator_backend: dialoguesidon
-overlap_separator_model: ${env.paths.dialoguesidon}
+overlap_separator_backend: sepreformer
+overlap_separator_model: ${env.paths.sepreformer}
 speaker_embedding_model: ${env.paths.speechbrain}

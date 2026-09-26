@@ -68,6 +68,24 @@ def vad_segments_from_diarization(
     return [{"start": start, "end": end, "label": "speech"} for start, end in merged]
 
 
+def turns_from_diarization(segments: Iterable[dict]) -> list[dict]:
+    """Merge consecutive segments of the same speaker into turns if they overlap or touch."""
+    sorted_segs = sorted(
+        [s for s in segments if float(s["end"]) > float(s["start"])],
+        key=lambda s: (float(s["start"]), float(s["end"])),
+    )
+    turns: list[dict] = []
+    for seg in sorted_segs:
+        start = float(seg["start"])
+        end = float(seg["end"])
+        speaker = str(seg["speaker"])
+        if turns and turns[-1]["speaker"] == speaker and start <= turns[-1]["end"]:
+            turns[-1]["end"] = max(turns[-1]["end"], end)
+        else:
+            turns.append({"start": start, "end": end, "speaker": speaker})
+    return turns
+
+
 def write_diarization_labels(
     labels_dir: Path,
     segments: Iterable[dict],

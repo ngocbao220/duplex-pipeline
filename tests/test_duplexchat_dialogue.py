@@ -194,7 +194,7 @@ def test_extract_valid_dialogues_includes_reason():
     ]
     dialogues_long = extract_valid_dialogues(segments_long, max_duration_seconds=600.0)
     assert len(dialogues_long) == 2
-    assert "Original dialogue too long (1200.0s > 600.0s)" in dialogues_long[0].reason
+    assert "Two-speaker dialogue accepted (original dialogue too long: 1200.0s > 600.0s" in dialogues_long[0].reason
     assert "preferred pause 596.0-600.0s (4.0s)" in dialogues_long[0].reason
     assert "chunk 1/2" in dialogues_long[0].reason
     assert "chunk 2/2" in dialogues_long[1].reason
@@ -212,8 +212,10 @@ def test_third_speaker_split_reason_includes_label_and_absolute_entry_time():
     dialogues = extract_valid_dialogues(segments)
 
     assert len(dialogues) == 2
-    assert "Detected third speaker label speaker_3 at 13.0s" in dialogues[0].reason
-    assert "Run resumes after third speaker label speaker_3 at 13.0s" in dialogues[1].reason
+    assert "Two-speaker dialogue accepted" in dialogues[0].reason
+    assert "Cut before third speaker speaker_3 at 13.0s" in dialogues[0].reason
+    assert "Two-speaker dialogue accepted" in dialogues[1].reason
+    assert "Resumed after third speaker speaker_3 at 13.0s" in dialogues[1].reason
 
 
 def test_overlong_dialogue_without_15s_pause_is_kept_with_reason():

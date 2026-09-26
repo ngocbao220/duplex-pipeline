@@ -1,6 +1,6 @@
 # @package diarization
 backend: sortformer
-model: nvidia/diar_streaming_sortformer_4spk-v2.1
+model: ${env.paths.sortformer}
 chunk_duration: null
 num_speakers: 2
 speaker_link_threshold: 0.75

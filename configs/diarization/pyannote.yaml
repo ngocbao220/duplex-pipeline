@@ -1,6 +1,6 @@
 # @package diarization
 backend: pyannote
-model: pyannote/speaker-diarization-community-1
+model: ${env.paths.pyannote}
 chunk_duration: null
 num_speakers: 2
 speaker_link_threshold: 0.75

@@ -219,6 +219,8 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     lid_cfg = split_cfg.get("lid", {})
     if lid_cfg.get("enabled", False) and lid_cfg.get("code"):
         cmd.extend(["--lid", str(lid_cfg.code)])
+        if lid_cfg.get("model"):
+            cmd.extend(["--lid-model", str(lid_cfg.model)])
         if lid_cfg.get("min_prob") is not None:
             cmd.extend(["--min-lid-prob", str(lid_cfg.min_prob)])
 

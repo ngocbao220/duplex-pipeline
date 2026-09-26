@@ -283,6 +283,129 @@ def test_split_dialogue_batch_writes_a_lid_audit_with_the_configured_threshold(m
     assert report["retention"]["after_lid"]["hours"] == 0
 
 
+def test_split_dialogue_report_updates_live_with_current_batch_only(monkeypatch, tmp_path):
+    batch = _batch_module()
+    raw_dir = tmp_path / "raw"
+    output_dir = tmp_path / "dialogues"
+    raw_dir.mkdir()
+    sources = [raw_dir / f"{name}.wav" for name in ("a", "b", "c", "d")]
+    for source in sources:
+        source.write_bytes(b"raw")
+
+    stale = output_dir / "unrelated" / "manifest.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps({
+        "source_audio": str(tmp_path / "other.wav"),
+        "audio_duration_sec": 9000,
+        "dialogue_count": 1,
+        "candidate_dialogues": [{"duration": 900}],
+        "dialogues": [{"duration": 900}],
+        "filter_summary": {
+            "candidate_dialogue_count": 1, "exported_dialogue_count": 1,
+            "lid": {"enabled": False},
+        },
+    }), encoding="utf-8")
+
+    observations = []
+    expected_dialogue_config = {
+        "gap_seconds": 5.0,
+        "min_duration_seconds": 10.0,
+        "max_duration_seconds": 600.0,
+        "max_single_speaker_ratio": 0.8,
+        "preferred_split_pause_seconds": 3.0,
+        "min_split_pause_seconds": 1.5,
+    }
+    resumed_output = output_dir / "d"
+    resumed_output.mkdir(parents=True)
+    (resumed_output / "manifest.json").write_text(json.dumps({
+        "source_audio": str(sources[-1]),
+        "audio_duration_sec": 3600,
+        "dialogue_count": 0,
+        "candidate_dialogues": [],
+        "dialogues": [],
+        "filter_summary": {
+            "candidate_dialogue_count": 0,
+            "exported_dialogue_count": 0,
+            "rejected_by_lid": 0,
+            "rejected_short": 0,
+            "rejected_imbalanced": 0,
+            "diarized_speaker_count": 2,
+            "dialogue_config": expected_dialogue_config,
+            "reason_format_version": 2,
+            "lid": {"enabled": False, "model": None, "min_vi_probability": None},
+        },
+    }), encoding="utf-8")
+
+    def fake_run(command, **_kwargs):
+        report_path = output_dir / "split_dialogue_report.json"
+        report = json.loads(report_path.read_text())
+        observations.append((report["progress"].copy(), report["counts"].copy(), report["retention"].copy()))
+        source = Path(command[command.index("--input") + 1])
+        worker_output = Path(command[command.index("--output-dir") + 1])
+        worker_output.mkdir(parents=True, exist_ok=True)
+        if source.name == "c.wav":
+            return type("Result", (), {"returncode": 9})()
+        accepted = source.name == "a.wav"
+        if accepted:
+            (worker_output / "dialogue_1.wav").write_bytes(b"dialogue")
+        rows = [{"duration": 120, "decision": "exported"}] if accepted else []
+        dialogues = [{"filename": "dialogue_1.wav", "duration": 120}] if accepted else []
+        (worker_output / "manifest.json").write_text(json.dumps({
+            "source_audio": str(source),
+            "audio_duration_sec": 3600,
+            "dialogue_count": len(dialogues),
+            "candidate_dialogues": rows,
+            "dialogues": dialogues,
+            "filter_summary": {
+                "candidate_dialogue_count": len(rows),
+                "exported_dialogue_count": len(dialogues),
+                "rejected_by_lid": 0,
+                "rejected_short": 0,
+                "rejected_imbalanced": 0,
+                "diarized_speaker_count": 2,
+                "dialogue_config": expected_dialogue_config,
+                "reason_format_version": 2,
+                "lid": {"enabled": False, "model": None, "min_vi_probability": None},
+            },
+        }), encoding="utf-8")
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(batch.subprocess, "run", fake_run)
+    monkeypatch.setattr(batch, "_audio_duration_seconds", lambda _path: 3600.0)
+    monkeypatch.setattr(sys, "argv", [
+        "run_pipeline_batch.py", "--step", "split_dialogue", "--input-dir", str(raw_dir),
+        "--output-dir", str(output_dir), "--resource-mode", "manual", "--workers", "1",
+    ])
+
+    batch.run_batch()
+
+    assert observations[0][0]["status"] == "running"
+    assert observations[0][0]["completed_audio_count"] == 0
+    assert observations[0][1]["input_audio"] == 4
+    assert observations[0][1]["candidate_dialogues"] == 0
+    assert json.loads((output_dir / "split_dialogue_report.json").read_text())["retention"]["source_hours"] == 4.0
+    assert observations[1][0]["completed_audio_count"] == 1
+    assert observations[1][1]["candidate_dialogues"] == 1
+    assert observations[1][2]["after_dialogue"]["hours"] == 120 / 3600
+    assert observations[1][2]["after_lid"]["hours"] == 120 / 3600
+    assert observations[2][0]["completed_audio_count"] == 2
+    assert observations[2][0]["failed_audio_count"] == 0
+    report = json.loads((output_dir / "split_dialogue_report.json").read_text())
+    assert report["progress"]["status"] == "complete"
+    assert report["progress"]["total_audio_count"] == 4
+    assert report["progress"]["completed_audio_count"] == 4
+    assert report["progress"]["failed_audio_count"] == 1
+    assert report["progress"]["remaining_audio_count"] == 0
+    assert report["counts"]["candidate_dialogues"] == 1
+    assert report["counts"]["exported_dialogues"] == 1
+    assert report["counts"]["manifest_audio"] == 3
+    assert len(report["audio"]) == 4
+    assert not any(item["source_audio"] == str(tmp_path / "other.wav") for item in report["audio"])
+    assert report["retention"]["source_hours"] == 4.0
+    assert report["retention"]["after_dialogue"]["hours"] == 120 / 3600
+
+
 def test_cholimex_dry_run_pairs_each_duplexchat_stereo_with_its_dialogue_mixture(monkeypatch, capsys, tmp_path):
     batch = _batch_module()
     duplex_dir = tmp_path / "duplexchat"

@@ -76,13 +76,12 @@ def _two_speaker_runs(segments: list[dict]) -> list[Dialogue]:
             current.append(seg)
             speakers.add(seg["speaker"])
         else:
-            event = f"third speaker label {seg['speaker']} at {float(seg['start']):.1f}s"
+            event = f"third speaker {seg['speaker']} at {float(seg['start']):.1f}s"
             if len(speakers) == 2:
-                split_events.append(f"Detected {event}")
-                runs.append(_dialogue_from_segments(current, split_events))
+                runs.append(_dialogue_from_segments(current, [f"Cut before {event}"]))
             current = [seg]
             speakers = {seg["speaker"]}
-            split_events = [f"Run resumes after {event}"]
+            split_events = [f"Resumed after {event}"]
 
     if len(speakers) == 2:
         runs.append(_dialogue_from_segments(current, split_events))
@@ -284,26 +283,25 @@ def extract_valid_dialogues(
                     ratios = speaker_time_ratios(chunk)
                     max_ratio = max(ratios.values()) if ratios else 0.0
                     split_context = "; ".join(chunk.split_events)
+                    details = [f"duration={chunk.duration:.1f}s", f"max speaker share={max_ratio:.0%}"]
+                    if split_context:
+                        details.append(f"context: {split_context}")
+
                     if orig_duration > max_duration_seconds and is_split:
                         chunk.reason = (
-                            f"Original dialogue too long ({orig_duration:.1f}s > "
-                            f"{max_duration_seconds:.1f}s); {split_context}; "
-                            f"chunk {idx}/{len(chunks)} ({chunk.duration:.1f}s); "
-                            f"max speaker share={max_ratio:.0%}"
+                            f"Two-speaker dialogue accepted (original dialogue too long: {orig_duration:.1f}s > "
+                            f"{max_duration_seconds:.1f}s; {split_context}; "
+                            f"chunk {idx}/{len(chunks)} [{chunk.duration:.1f}s]; "
+                            f"max speaker share={max_ratio:.0%})"
                         )
                     elif orig_duration > max_duration_seconds:
                         chunk.reason = (
-                            f"Original dialogue too long ({orig_duration:.1f}s > "
-                            f"{max_duration_seconds:.1f}s), kept intact because no internal "
-                            f"pause of at least 1.5s was available; {split_context or 'two-speaker run'}"
+                            f"Two-speaker dialogue accepted (original dialogue too long: {orig_duration:.1f}s > "
+                            f"{max_duration_seconds:.1f}s, kept intact because no internal "
+                            f"pause of at least 1.5s was available; {'; '.join(details)})"
                         )
-                    elif split_context:
-                        chunk.reason = f"Two-speaker dialogue; {split_context}"
                     else:
-                        chunk.reason = (
-                            f"Two-speaker dialogue accepted (duration={chunk.duration:.1f}s, "
-                            f"max speaker share={max_ratio:.0%})"
-                        )
+                        chunk.reason = f"Two-speaker dialogue accepted ({'; '.join(details)})"
                     result.append(chunk)
     return result
 

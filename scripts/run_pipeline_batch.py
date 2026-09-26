@@ -9,11 +9,13 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from pathlib import Path
 
+UTC = getattr(dt, "UTC", dt.timezone.utc)
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -197,6 +199,8 @@ def _summarize_split_dialogue_manifests(
     input_audio_count: int,
     input_audio_durations: dict[str, float | None] | None = None,
     configured_dialogue_config: dict | None = None,
+    manifest_paths: list[Path] | None = None,
+    include_unprocessed_audio: bool = True,
 ) -> dict:
     """Build a filter and duration-retention audit from per-audio manifests."""
     audio = []
@@ -227,22 +231,23 @@ def _summarize_split_dialogue_manifests(
             ),
         }
 
-    for manifest_path in sorted(output_dir.glob("*/manifest.json")):
+    paths = sorted(manifest_paths) if manifest_paths is not None else sorted(output_dir.glob("*/manifest.json"))
+    for manifest_path in paths:
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             summary = manifest["filter_summary"]
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             continue
 
+        source_audio = manifest.get("source_audio")
+        source_key = str(Path(source_audio).resolve()) if source_audio else None
         lid = summary.get("lid", {})
         lid_configs.append(lid)
         dialogue_config = summary.get("dialogue_config")
         if isinstance(dialogue_config, dict):
             dialogue_configs.setdefault(json.dumps(dialogue_config, sort_keys=True), dialogue_config)
         dialogue_count = int(manifest.get("dialogue_count", 0))
-        source_audio = manifest.get("source_audio")
         source_duration = manifest.get("audio_duration_sec")
-        source_key = str(Path(source_audio).resolve()) if source_audio else None
         if source_duration is None and source_key and input_audio_durations:
             source_duration = input_audio_durations.get(source_key)
         source_duration = float(source_duration) if source_duration is not None else None
@@ -280,7 +285,7 @@ def _summarize_split_dialogue_manifests(
         audio.append(audio_item)
 
     # Include input files without a completed manifest so report coverage is visible.
-    if input_audio_durations:
+    if include_unprocessed_audio and input_audio_durations:
         known_sources = {
             str(Path(item["source_audio"]).resolve())
             for item in audio if item.get("source_audio")
@@ -461,7 +466,8 @@ def _log_preflight_info(args, input_dir: Path, output_dir: Path) -> None:
             print("  ├── Music Filter (Demucs)       : DISABLED (--no-filter-music)")
 
         if args.lid:
-            models_to_check.append(("Language ID (Whisper LID)", "openai/whisper-small", "WHISPER_MODEL_PATH", "whisper-small", ["config.json"]))
+            lid_model_name = getattr(args, "lid_model", None) or "openai/whisper-small"
+            models_to_check.append(("Language ID (Whisper LID)", lid_model_name, "WHISPER_MODEL_PATH", "whisper-small", ["config.json"]))
         else:
             print("  ├── Language ID (Whisper LID)   : DISABLED")
 
@@ -640,6 +646,8 @@ def run_batch():
                         help="Disable Demucs music filtering.")
     parser.add_argument("--lid", type=str, default=None,
                         help="Enable Language Identification filter (e.g., 'vi' for Vietnamese).")
+    parser.add_argument("--lid-model", type=str, default=None,
+                        help="Whisper LID model path or identifier (e.g., openai/whisper-small or local path).")
     parser.add_argument("--min-lid-prob", type=float, default=0.5,
                         help="Keep a LID candidate only when its Vietnamese probability meets this threshold.")
     parser.add_argument("--diarization-backend", type=str, default=None,
@@ -765,6 +773,132 @@ def run_batch():
             print(f"No files matching '{args.pattern}' found in {input_dir}")
             return
 
+        input_audio_durations = None if args.dry_run else {
+            str(wav.resolve()): _audio_duration_seconds(wav) for wav in wav_files
+        }
+        completed_source_paths: set[str] = set()
+        valid_manifest_paths: set[Path] = set()
+        failed_source_paths: set[str] = set()
+        observed_lid_configs: list[dict] = []
+        split_report_lock = threading.Lock()
+        live_report = None
+        if input_audio_durations is not None:
+            live_report = _summarize_split_dialogue_manifests(
+                output_dir,
+                input_audio_count=len(wav_files),
+                input_audio_durations=input_audio_durations,
+                configured_dialogue_config=dialogue_config,
+                manifest_paths=[],
+                include_unprocessed_audio=False,
+            )
+            live_report.pop("audio", None)
+
+        def _merge_completed_manifest(contribution: dict) -> None:
+            assert live_report is not None
+            for name, value in contribution["counts"].items():
+                if name != "input_audio":
+                    live_report["counts"][name] += value
+            live_report["retention"]["processed_source_hours"] += contribution["retention"]["processed_source_hours"]
+            for phase in ("after_dialogue", "after_lid"):
+                live_report["retention"][phase]["hours"] += contribution["retention"][phase]["hours"]
+
+            retention = live_report["retention"]
+            source_hours = retention["source_hours"]
+            processed_hours = retention["processed_source_hours"]
+            retention["unprocessed_source_hours"] = max(0.0, source_hours - processed_hours)
+            for phase in ("after_dialogue", "after_lid"):
+                stage = retention[phase]
+                stage["retention_percent_of_source"] = (
+                    stage["hours"] / source_hours * 100 if source_hours > 0 else None
+                )
+                removed_hours = max(0.0, processed_hours - stage["hours"])
+                stage["removed_hours"] = removed_hours
+                stage["removed_percent_of_source"] = (
+                    removed_hours / source_hours * 100 if source_hours > 0 else None
+                )
+            removed = {
+                "dialogue": retention["after_dialogue"]["removed_hours"],
+                "lid": retention["after_lid"]["removed_hours"],
+            }
+            retention["largest_duration_drop_phase"] = max(removed, key=removed.get) if any(removed.values()) else None
+
+            lid = contribution["lid"]
+            if lid["enabled"] is not None:
+                observed_lid_configs.append(lid)
+                enabled = {bool(item["enabled"]) for item in observed_lid_configs}
+                live_report["lid"]["enabled"] = enabled.pop() if len(enabled) == 1 else None
+                live_report["lid"]["model"] = observed_lid_configs[0].get("model")
+                live_report["lid"]["min_vi_probability"] = observed_lid_configs[0].get("min_vi_probability")
+
+            observed_configs = live_report["dialogue_filter"]["observed_configurations"]
+            for config in contribution["dialogue_filter"]["observed_configurations"]:
+                if config not in observed_configs:
+                    observed_configs.append(config)
+            configured = live_report["dialogue_filter"]["configured"]
+            live_report["dialogue_filter"]["consistent"] = (
+                bool(observed_configs)
+                and len(observed_configs) == 1
+                and (configured is None or observed_configs[0] == configured)
+            )
+
+        def _progress_snapshot() -> dict:
+            completed_count = len(completed_source_paths)
+            return {
+                "status": "complete" if completed_count == len(wav_files) else "running",
+                "total_audio_count": len(wav_files),
+                "completed_audio_count": completed_count,
+                "failed_audio_count": len(failed_source_paths),
+                "remaining_audio_count": len(wav_files) - completed_count,
+                "updated_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+            }
+
+        def _write_current_split_dialogue_report() -> tuple[dict, Path]:
+            assert live_report is not None
+            live_report["progress"] = _progress_snapshot()
+            report_path = _write_split_dialogue_report(output_dir, live_report)
+            return live_report, report_path
+
+        def _publish_split_dialogue_report() -> tuple[dict, Path]:
+            with split_report_lock:
+                return _write_current_split_dialogue_report()
+
+        def _finalize_split_dialogue_report() -> tuple[dict, Path]:
+            with split_report_lock:
+                report = _summarize_split_dialogue_manifests(
+                    output_dir,
+                    input_audio_count=len(wav_files),
+                    input_audio_durations=input_audio_durations,
+                    configured_dialogue_config=dialogue_config,
+                    manifest_paths=sorted(valid_manifest_paths),
+                )
+                report["progress"] = _progress_snapshot()
+                report_path = _write_split_dialogue_report(output_dir, report)
+                return report, report_path
+
+        def _record_split_dialogue_completion(wav: Path, sub_out: Path, timing: dict) -> dict:
+            source_key = str(wav.resolve())
+            has_valid_manifest = timing.get("exit_code") == 0 and _split_dialogue_complete(sub_out)
+            with split_report_lock:
+                if has_valid_manifest:
+                    manifest_path = sub_out / "manifest.json"
+                    contribution = _summarize_split_dialogue_manifests(
+                        output_dir,
+                        input_audio_count=len(wav_files),
+                        input_audio_durations={source_key: input_audio_durations.get(source_key)},
+                        configured_dialogue_config=dialogue_config,
+                        manifest_paths=[manifest_path],
+                        include_unprocessed_audio=False,
+                    )
+                    _merge_completed_manifest(contribution)
+                    valid_manifest_paths.add(manifest_path)
+                completed_source_paths.add(source_key)
+                if has_valid_manifest:
+                    failed_source_paths.discard(source_key)
+                else:
+                    failed_source_paths.add(source_key)
+                _write_current_split_dialogue_report()
+            return timing
+
         print(f"=== Running split_dialogue on {len(wav_files)} files from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
         if args.dry_run:
             for idx, wav in enumerate(wav_files, start=1):
@@ -784,6 +918,8 @@ def run_batch():
                     cmd.append("--debug")
                 if args.lid:
                     cmd.extend(["--lid", args.lid, "--min-lid-prob", str(args.min_lid_prob)])
+                    if getattr(args, "lid_model", None):
+                        cmd.extend(["--lid-model", args.lid_model])
                 if args.diarization_backend:
                     cmd.extend(["--diarization-backend", args.diarization_backend])
                 if args.diarization_model:
@@ -799,7 +935,7 @@ def run_batch():
                 sub_out = output_dir / wav.stem
                 if _split_dialogue_complete(sub_out, dialogue_config):
                     print(f"[RESUMED] {wav.name}: complete split output at {sub_out}")
-                    return _resumed_timing(wav, sub_out)
+                    return _record_split_dialogue_completion(wav, sub_out, _resumed_timing(wav, sub_out))
                 _archive_incomplete_output(sub_out)
                 worker_env = dict(env)
                 if target_gpu != "cpu":
@@ -816,6 +952,8 @@ def run_batch():
                     cmd.append("--debug")
                 if args.lid:
                     cmd.extend(["--lid", args.lid, "--min-lid-prob", str(args.min_lid_prob)])
+                    if getattr(args, "lid_model", None):
+                        cmd.extend(["--lid-model", args.lid_model])
                 if args.diarization_backend:
                     cmd.extend(["--diarization-backend", args.diarization_backend])
                 if args.diarization_model:
@@ -824,9 +962,25 @@ def run_batch():
                     cmd.extend(["--diarize-chunk", str(args.diarize_chunk)])
                 _append_dialogue_config_args(cmd, dialogue_config)
                 print(f"[{idx}/{len(wav_files)}] {gpu_tag}{wav.name} -> {sub_out.name}")
-                timing = _timed_subprocess(cmd, wav, sub_out, worker_env)
+                try:
+                    timing = _timed_subprocess(cmd, wav, sub_out, worker_env)
+                except Exception as error:
+                    timing = {
+                        "input": str(wav.resolve()),
+                        "output": str(sub_out.resolve()),
+                        "started_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+                        "ended_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+                        "elapsed_seconds": 0.0,
+                        "audio_seconds": input_audio_durations.get(str(wav.resolve())),
+                        "real_time_factor": None,
+                        "audio_seconds_per_wall_second": None,
+                        "exit_code": None,
+                        "status": "failed",
+                        "error": f"{type(error).__name__}: {error}",
+                    }
                 if timing["exit_code"] != 0:
-                    print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
+                    detail = timing.get("error") or f"exit code {timing['exit_code']}"
+                    print(f"Error processing {wav.name}: {detail}")
                 elif not list(sub_out.glob("dialogue_*.wav")):
                     manifest_path = sub_out / "manifest.json"
                     reason = "no dialogue clips passed filter"
@@ -836,8 +990,10 @@ def run_batch():
                         except (OSError, json.JSONDecodeError):
                             pass
                     print(f"[WARNING] '{wav.name}' produced 0 dialogue clips (Reason: {reason})")
-                return timing
+                return _record_split_dialogue_completion(wav, sub_out, timing)
 
+            _, progress_report_path = _publish_split_dialogue_report()
+            print(f"Live split dialogue report: {progress_report_path}", flush=True)
             timing_items, resource_plan = _run_gpu_items(
                 list(enumerate(wav_files, start=1)), gpu_list, _process_one_wav,
                 resource_mode=args.resource_mode, configured_workers_per_gpu=workers_per_gpu,
@@ -1117,16 +1273,7 @@ def run_batch():
 
     if not args.dry_run:
         if args.step == "split_dialogue":
-            input_audio_durations = {
-                str(wav.resolve()): _audio_duration_seconds(wav) for wav in wav_files
-            }
-            split_report = _summarize_split_dialogue_manifests(
-                output_dir,
-                input_audio_count=len(wav_files),
-                input_audio_durations=input_audio_durations,
-                configured_dialogue_config=dialogue_config,
-            )
-            split_report_path = _write_split_dialogue_report(output_dir, split_report)
+            split_report, split_report_path = _finalize_split_dialogue_report()
             _print_split_dialogue_summary(split_report, split_report_path)
         phase = _phase_report(args.step, args, phase_started_at, perf_counter() - phase_started, timing_items, resource_plan)
         report_path = _write_timing_report(workflow_id, phase)
