@@ -75,8 +75,9 @@ def _setup_runtime_environment(cfg: DictConfig) -> dict[str, str]:
     # PYTHONPATH
     duplex_src = str(ROOT_DIR / "pipeline" / "duplexchat" / "src")
     cholimex_src = str(ROOT_DIR / "pipeline" / "cholimex" / "src")
+    sommelier_src = str(ROOT_DIR / "pipeline" / "sommelier" / "src")
     existing_pythonpath = env.get("PYTHONPATH", "")
-    paths = [str(ROOT_DIR), duplex_src, cholimex_src]
+    paths = [str(ROOT_DIR), duplex_src, cholimex_src, sommelier_src]
     if existing_pythonpath:
         paths.append(existing_pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(paths)

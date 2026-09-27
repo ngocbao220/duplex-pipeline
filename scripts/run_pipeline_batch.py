@@ -764,7 +764,15 @@ def run_batch():
     env["OPENBLAS_NUM_THREADS"] = "1"
     env["VECLIB_MAXIMUM_THREADS"] = "1"
     env["NUMEXPR_NUM_THREADS"] = "1"
-    env["TORCH_NUM_THREADS"] = "1"
+    # Ensure PYTHONPATH contains project root and package sources for child subprocesses
+    duplex_src = str(ROOT_DIR / "pipeline" / "duplexchat" / "src")
+    cholimex_src = str(ROOT_DIR / "pipeline" / "cholimex" / "src")
+    sommelier_src = str(ROOT_DIR / "pipeline" / "sommelier" / "src")
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    paths = [str(ROOT_DIR), duplex_src, cholimex_src, sommelier_src]
+    if existing_pythonpath:
+        paths.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(paths)
 
     resource_plan = None
     import queue
