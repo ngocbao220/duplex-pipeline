@@ -214,11 +214,16 @@ def test_data_paths_resolve_when_environment_omits_base_data():
 
     with open_dict(cfg.env.paths):
         del cfg.env.paths["base_data"]
+        del cfg.env.paths["base_output"]
     resolved = OmegaConf.to_container(cfg, resolve=True)
 
     assert resolved["data"]["base_dir"] == "data"
+    assert resolved["data"]["base_output_dir"] == "outputs/processed"
     assert resolved["data"]["crawl_dir"] == "data/crawl"
     assert resolved["data"]["raw_dir"] == "data/raw/youtube"
+    assert resolved["data"]["dialogue_dir"] == "outputs/processed/dialogue/youtube"
+    assert resolved["data"]["sommelier_out_dir"] == "outputs/processed/sommelier/youtube"
+    assert resolved["topic_map"]["output_dir"] == "outputs/processed/topic-map"
 
 
 def test_server_config_declares_explicit_sommelier_local_models():

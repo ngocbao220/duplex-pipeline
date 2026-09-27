@@ -19,12 +19,13 @@ dry_run: false          # Print execution commands without running
 data:
   source: youtube       # Sub-corpus name (e.g. youtube, podcast_index)
   base_dir: ${oc.select:env.paths.base_data,${oc.env:DATA_ROOT,data}}
+  base_output_dir: ${oc.select:env.paths.base_output,${oc.env:OUTPUT_ROOT,outputs/processed}}
   crawl_dir: ${data.base_dir}/crawl
   raw_dir: ${data.base_dir}/raw/${data.source}
-  dialogue_dir: ${env.paths.base_output}/dialogue/${data.source}
-  duplex_out_dir: ${env.paths.base_output}/duplexchat/${data.source}
-  sommelier_out_dir: ${env.paths.base_output}/sommelier/${data.source}
-  cholimex_out_dir: ${env.paths.base_output}/cholimex/${data.source}
+  dialogue_dir: ${data.base_output_dir}/dialogue/${data.source}
+  duplex_out_dir: ${data.base_output_dir}/duplexchat/${data.source}
+  sommelier_out_dir: ${data.base_output_dir}/sommelier/${data.source}
+  cholimex_out_dir: ${data.base_output_dir}/cholimex/${data.source}
   pattern: "*.wav"
 
 # Shared Runtime Settings
@@ -36,7 +37,7 @@ runtime:
 topic_map:
   input_dir: transcripts
   model_dir: ${env.paths.vietnamese_bi_encoder}
-  output_dir: ${env.paths.base_output}/topic-map
+  output_dir: ${data.base_output_dir}/topic-map
   device: ${runtime.device}
 
 # Concurrency & Performance Optimization (Tuned for GPU A100 40GB)
