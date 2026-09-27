@@ -28,7 +28,7 @@ Mẫu chung:
 python run_pipeline.py step=<step> pipeline=<pipeline> env=<env> gpu=<gpu> data.source=<source> <override>=<value>
 ```
 
-`step` nhận một trong các giá trị `convert`, `split_dialogue`, `separate_dialogue`, `sommelier`, `cholimex`, `asr`, `benchmark`, `topic_map`, hoặc `all`. `pipeline` có đúng ba lựa chọn: `duplexchat`, `sommelier`, `cholimex`; `source` là `youtube` hoặc `podcast_index`.
+`step` nhận một trong các giá trị `convert`, `split_dialogue`, `separate_stereo`, `asr`, hoặc `all`. `pipeline` có đúng ba lựa chọn: `duplexchat`, `sommelier`, `cholimex`; `source` là `youtube` hoặc `podcast_index`. (Khi chạy `step=separate_stereo`, hệ thống tự điều phối theo `pipeline`: DuplexChat, Sommelier, hoặc Cholimex).
 
 ASR chạy trên stereo 24 kHz cuối cùng của DuplexChat hoặc Sommelier. Cài `requirements-asr.txt` trong môi trường riêng và truyền interpreter đó bằng `asr.python=/path/to/asr/bin/python`; nếu không chỉ định, bước ASR dùng Python của lệnh điều phối. `step=all` gọi ASR sau reconstruction, trước benchmark. Có thể chạy riêng `python run_pipeline.py step=asr pipeline=duplexchat env=sever data.source=youtube asr.python=/path/to/asr/bin/python` hoặc thay `pipeline=sommelier`. Artifact `dialogue_N.asr.json` nằm cạnh `stereo_N.wav`; `asr_report.json` ghi kết quả từng mẫu. `env=dev` tải model Zipformer và aligner từ Hugging Face; `env=sever` yêu cầu các checkpoint local ở `configs/asr/default.yaml` cùng SpeechBrain và Silero trong `configs/env/sever.yaml`. Điều chỉnh tên file ONNX/tokenizer và đường dẫn model bằng Hydra override khi bộ checkpoint khác bản mặc định.
 
@@ -100,19 +100,19 @@ Nguồn triển khai: [Vietnamese Bi-Encoder model card](https://huggingface.co/
 Tách bằng DuplexChat:
 
 ```text
-python run_pipeline.py step=separate_dialogue pipeline=duplexchat env=sever gpu=0 data.source=youtube optimization.workers=2 pipeline.separation.chunk=60.0 pipeline.separation.num_steps=30
+python run_pipeline.py step=separate_stereo pipeline=duplexchat env=sever gpu=0 data.source=youtube optimization.workers=2 pipeline.separation.chunk=60.0 pipeline.separation.num_steps=30
 ```
 
 Tách và tái tạo bằng Sommelier:
 
 ```text
-python run_pipeline.py step=sommelier pipeline=sommelier env=sever gpu=0 data.source=youtube optimization.workers=2
+python run_pipeline.py step=separate_stereo pipeline=sommelier env=sever gpu=0 data.source=youtube optimization.workers=2
 ```
 
-Refine stereo của DuplexChat bằng Cholimex. Mỗi `stereo_N.wav` được ghép với `dialogue_N.wav` tương ứng; thiếu một trong hai file sẽ được báo và bỏ qua.
+Refine stereo của DuplexChat bằng Cholimex:
 
 ```text
-python run_pipeline.py step=cholimex pipeline=cholimex env=sever gpu=0 data.source=youtube optimization.workers=2
+python run_pipeline.py step=separate_stereo pipeline=cholimex env=sever gpu=0 data.source=youtube optimization.workers=2
 ```
 
 Đánh giá đầu ra stereo:

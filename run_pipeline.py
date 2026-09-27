@@ -350,6 +350,27 @@ def step_cholimex(cfg: DictConfig, env: dict[str, str]) -> int:
     return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
 
 
+def step_separate_stereo(cfg: DictConfig, env: dict[str, str]) -> int:
+    """Phase 2: Separate stereo audio tracks using pipeline choice (duplexchat, sommelier, or cholimex)."""
+    pipeline_name = str(cfg.pipeline.name).lower()
+    if pipeline_name == "duplexchat":
+        return step_separate_dialogue(cfg, env)
+    elif pipeline_name == "sommelier":
+        return step_sommelier(cfg, env)
+    elif pipeline_name == "cholimex":
+        # Cholimex refines DuplexChat separation
+        ret = step_separate_dialogue(cfg, env)
+        if ret != 0:
+            return ret
+        return step_cholimex(cfg, env)
+    else:
+        logger.error(
+            "Unknown pipeline '%s' for separate_stereo. Allowed: duplexchat | sommelier | cholimex",
+            pipeline_name,
+        )
+        return 1
+
+
 def step_benchmark(cfg: DictConfig, env: dict[str, str]) -> int:
     """Phase 3: Stereo Benchmark & Data Retention Reporting."""
     print(section("Stereo Benchmark"))
@@ -505,8 +526,8 @@ def main(cfg: DictConfig) -> None:
     elif step == "split_dialogue":
         sys.exit(step_split_dialogue(cfg, env))
 
-    elif step == "separate_dialogue":
-        sys.exit(step_separate_dialogue(cfg, env))
+    elif step in ("separate_stereo", "separate_dialogue"):
+        sys.exit(step_separate_stereo(cfg, env))
 
     elif step == "sommelier":
         sys.exit(step_sommelier(cfg, env))
@@ -529,57 +550,33 @@ def main(cfg: DictConfig) -> None:
             logger.error("Convert step failed.")
             sys.exit(1)
 
-        if pipeline_name == "duplexchat":
-            # Phase 1: Dialogue Filtering
-            if step_split_dialogue(cfg, env) != 0:
-                logger.error("Dialogue filtering step failed.")
-                sys.exit(1)
-            # Phase 2: Separate Dialogue
-            if step_separate_dialogue(cfg, env) != 0:
-                logger.error("DuplexChat separation step failed.")
-                sys.exit(1)
-            if step_asr(cfg, env) != 0:
-                logger.error("ASR step failed.")
-                sys.exit(1)
-            # Phase 3: Benchmark
-            if step_benchmark(cfg, env) != 0:
-                logger.error("Benchmark step failed.")
-                sys.exit(1)
+        # Phase 1: Dialogue Filtering
+        if step_split_dialogue(cfg, env) != 0:
+            logger.error("Dialogue filtering step failed.")
+            sys.exit(1)
 
-        elif pipeline_name == "sommelier":
-            if step_split_dialogue(cfg, env) != 0:
-                logger.error("Dialogue filtering step failed.")
-                sys.exit(1)
-            # Phase 2: Sommelier full pipeline
-            if step_sommelier(cfg, env) != 0:
-                logger.error("Sommelier step failed.")
-                sys.exit(1)
-            if step_asr(cfg, env) != 0:
-                logger.error("ASR step failed.")
-                sys.exit(1)
-            # Phase 3: Benchmark
-            if step_benchmark(cfg, env) != 0:
-                logger.error("Benchmark step failed.")
-                sys.exit(1)
+        # Phase 2: Separate Stereo (dispatched by pipeline: duplexchat, sommelier, or cholimex)
+        if step_separate_stereo(cfg, env) != 0:
+            logger.error("Separate stereo step failed for pipeline '%s'.", pipeline_name)
+            sys.exit(1)
 
-        elif pipeline_name == "cholimex":
-            if step_split_dialogue(cfg, env) != 0:
-                logger.error("Dialogue filtering step failed.")
-                sys.exit(1)
-            if step_separate_dialogue(cfg, env) != 0:
-                logger.error("DuplexChat separation step failed.")
-                sys.exit(1)
-            if step_cholimex(cfg, env) != 0:
-                logger.error("Cholimex refinement step failed.")
-                sys.exit(1)
-            if step_benchmark(cfg, env) != 0:
-                logger.error("Benchmark step failed.")
-                sys.exit(1)
+        # Phase 3: ASR
+        if step_asr(cfg, env) != 0:
+            logger.error("ASR step failed.")
+            sys.exit(1)
+
+        # Phase 4: Benchmark
+        if step_benchmark(cfg, env) != 0:
+            logger.error("Benchmark step failed.")
+            sys.exit(1)
 
         logger.info("All pipeline phases completed successfully.")
 
     else:
-        logger.error("Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | asr | benchmark | topic_map", step)
+        logger.error(
+            "Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_stereo | asr",
+            step,
+        )
         sys.exit(1)
 
 

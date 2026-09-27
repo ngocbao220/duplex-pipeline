@@ -10,7 +10,7 @@ defaults:
   - _self_
 
 # Execution controls
-step: all               # Options: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | asr | benchmark | topic_map
+step: all               # Options: all | convert | split_dialogue | separate_stereo | asr
 gpu: 0                # Target GPU ID: auto (detects all available GPUs) | "0,1" | 0 | 1
 debug: false            # Write intermediate debug audio/artifacts
 dry_run: false          # Print execution commands without running
