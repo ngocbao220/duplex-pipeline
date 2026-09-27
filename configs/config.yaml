@@ -36,7 +36,7 @@ runtime:
 # Transcript topic map
 topic_map:
   input_dir: transcripts
-  model_dir: ${env.paths.vietnamese_bi_encoder}
+  model_dir: ${oc.select:env.paths.vietnamese_bi_encoder,${oc.select:env.paths.base_models,${oc.env:MODEL_ROOT,models}}/vietnamese-bi-encoder}
   output_dir: ${data.base_output_dir}/topic-map
   device: ${runtime.device}
 

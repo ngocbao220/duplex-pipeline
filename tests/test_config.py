@@ -226,6 +226,26 @@ def test_data_paths_resolve_when_environment_omits_base_data():
     assert resolved["topic_map"]["output_dir"] == "outputs/processed/topic-map"
 
 
+def test_unrelated_topic_map_path_resolves_when_environment_omits_its_alias():
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf, open_dict
+
+    config_dir = str(Path(__file__).resolve().parents[1] / "configs")
+    with initialize_config_dir(version_base=None, config_dir=config_dir):
+        cfg = compose(
+            config_name="config",
+            overrides=["env=dev", "step=separate_stereo", "pipeline=sommelier"],
+        )
+
+    with open_dict(cfg.env.paths):
+        del cfg.env.paths["vietnamese_bi_encoder"]
+    resolved = OmegaConf.to_container(cfg, resolve=True)
+
+    assert resolved["topic_map"]["model_dir"] == (
+        "/kaggle/input/models/ngocbaotrinhtuan/vietnamese-bi-encoder"
+    )
+
+
 def test_server_config_declares_explicit_sommelier_local_models():
     root = Path(__file__).resolve().parents[1]
     import yaml
