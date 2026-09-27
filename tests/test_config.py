@@ -432,3 +432,7 @@ def test_core_runtime_dependencies_are_pinned():
     assert "nemo_toolkit[asr]==3.0.0" in somm_req
     assert "onnx==1.22.0" in somm_req
     assert "onnxruntime==1.22.1" in somm_req
+
+    # ASR Python startup hook requires this module in the isolated ASR runtime.
+    asr_req = (root / "requirements-asr.txt").read_text()
+    assert "wrapt" in asr_req.splitlines()

@@ -2,6 +2,7 @@
 # This runtime is shared by the DuplexChat and Sommelier ASR output steps.
 torch==2.7.1
 torchaudio==2.7.1
+wrapt
 numpy
 soundfile
 scipy
