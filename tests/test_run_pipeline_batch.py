@@ -48,6 +48,7 @@ def test_sommelier_publish_keeps_one_numbered_stereo_without_copying_audio(tmp_p
     dialogue.touch()
     generated = run_output / "stereo_2.wav"
     generated.write_bytes(b"stereo")
+    generated.with_suffix(".channels.json").write_text('{"channel_speakers":["A","B"]}')
     (collection_output / "audio.stereo.wav").write_bytes(b"legacy duplicate")
 
     published = batch._publish_sommelier_stereo(run_output, collection_output, dialogue)
@@ -55,6 +56,7 @@ def test_sommelier_publish_keeps_one_numbered_stereo_without_copying_audio(tmp_p
     assert published == collection_output / "stereo_2.wav"
     assert published.read_bytes() == b"stereo"
     assert published.stat().st_ino == generated.stat().st_ino
+    assert published.with_suffix(".channels.json").read_text() == '{"channel_speakers":["A","B"]}'
     assert not (collection_output / "audio.stereo.wav").exists()
 
 

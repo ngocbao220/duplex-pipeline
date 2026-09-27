@@ -96,6 +96,9 @@ def _publish_sommelier_stereo(run_output: Path, collection_output: Path, dialogu
     source = run_output / f"stereo_{match.group(1)}.wav"
     if not source.is_file() or source.stat().st_size == 0:
         raise FileNotFoundError(f"Sommelier completed without numbered stereo output: {source}")
+    channel_source = source.with_suffix(".channels.json")
+    if not channel_source.is_file():
+        raise FileNotFoundError(f"Sommelier channel mapping is missing: {channel_source}")
     target = collection_output / source.name
     # Legacy Sommelier runs wrote this unnumbered duplicate into the same
     # collection folder.  A successful numbered publish supersedes it.
@@ -106,6 +109,11 @@ def _publish_sommelier_stereo(run_output: Path, collection_output: Path, dialogu
     temporary.unlink(missing_ok=True)
     os.link(source, temporary)
     os.replace(temporary, target)
+    channel_target = target.with_suffix(".channels.json")
+    channel_temporary = channel_target.with_name(f".{channel_target.name}.{os.getpid()}.tmp")
+    channel_temporary.unlink(missing_ok=True)
+    os.link(channel_source, channel_temporary)
+    os.replace(channel_temporary, channel_target)
     return target
 
 

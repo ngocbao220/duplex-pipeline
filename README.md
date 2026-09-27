@@ -4,7 +4,7 @@ Pipeline xử lý cuộc thoại hai người gồm DuplexChat (DialogueSidon), 
 
 ## Chuẩn bị
 
-Chạy từ thư mục gốc dự án với Python 3.12. Mỗi pipeline dùng môi trường riêng: DuplexChat và benchmark dùng `requirements-duplexchat.txt`; Sommelier dùng `requirements-sommelier.txt`. Không cài hai file này trong cùng một môi trường vì chúng dùng các bộ Torch/NeMo khác nhau.
+Chạy từ thư mục gốc dự án với Python 3.12. Mỗi pipeline dùng môi trường riêng: DuplexChat và benchmark dùng `requirements-duplexchat.txt`; Sommelier dùng `requirements-sommelier.txt`; ASR dùng `requirements-asr.txt`. Không cài hai stack Torch/NeMo của DuplexChat và Sommelier trong cùng một môi trường.
 
 ```text
 python -m pip install --upgrade pip setuptools wheel
@@ -28,7 +28,11 @@ Mẫu chung:
 python run_pipeline.py step=<step> pipeline=<pipeline> env=<env> gpu=<gpu> data.source=<source> <override>=<value>
 ```
 
-`step` nhận một trong các giá trị `convert`, `split_dialogue`, `separate_dialogue`, `sommelier`, `cholimex`, `benchmark`, `topic_map`, hoặc `all`. `pipeline` có đúng ba lựa chọn: `duplexchat`, `sommelier`, `cholimex`; `source` là `youtube` hoặc `podcast_index`.
+`step` nhận một trong các giá trị `convert`, `split_dialogue`, `separate_dialogue`, `sommelier`, `cholimex`, `asr`, `benchmark`, `topic_map`, hoặc `all`. `pipeline` có đúng ba lựa chọn: `duplexchat`, `sommelier`, `cholimex`; `source` là `youtube` hoặc `podcast_index`.
+
+ASR chạy trên stereo 24 kHz cuối cùng của DuplexChat hoặc Sommelier. Cài `requirements-asr.txt` trong môi trường riêng và truyền interpreter đó bằng `asr.python=/path/to/asr/bin/python`; nếu không chỉ định, bước ASR dùng Python của lệnh điều phối. `step=all` gọi ASR sau reconstruction, trước benchmark. Có thể chạy riêng `python run_pipeline.py step=asr pipeline=duplexchat env=sever data.source=youtube asr.python=/path/to/asr/bin/python` hoặc thay `pipeline=sommelier`. Artifact `dialogue_N.asr.json` nằm cạnh `stereo_N.wav`; `asr_report.json` ghi kết quả từng mẫu. `env=dev` tải model Zipformer và aligner từ Hugging Face; `env=sever` yêu cầu các checkpoint local ở `configs/asr/default.yaml` cùng SpeechBrain và Silero trong `configs/env/sever.yaml`. Điều chỉnh tên file ONNX/tokenizer và đường dẫn model bằng Hydra override khi bộ checkpoint khác bản mặc định.
+
+Chọn kiểu giải mã Zipformer bằng `asr.zipformer.decoding_method=greedy_search` hoặc `asr.zipformer.decoding_method=modified_beam_search`; với beam search có thể đặt thêm `asr.zipformer.max_active_paths=8`.
 
 ### Chạy toàn bộ pipeline
 

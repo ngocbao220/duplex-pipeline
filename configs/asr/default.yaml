@@ -1,0 +1,20 @@
+# @package asr
+python: null  # Optional interpreter of an isolated ASR environment.
+zipformer:
+  model_id: hynt/Zipformer-30M-RNNT-6000h
+  local_dir: ${env.paths.base_models}/Zipformer-30M-RNNT-6000h
+  encoder: encoder-epoch-20-avg-10.onnx
+  decoder: decoder-epoch-20-avg-10.onnx
+  joiner: joiner-epoch-20-avg-10.onnx
+  bpe_model: bpe.model
+  decoding_method: greedy_search  # greedy_search | modified_beam_search
+  max_active_paths: 4
+aligner:
+  model_id: nguyenvulebinh/wav2vec2-base-vi-vlsp2020
+  local_dir: ${env.paths.base_models}/wav2vec2-base-vi-vlsp2020
+regions:
+  merge_gap_seconds: 0.5
+  pad_seconds: 0.25
+channel_matching:
+  min_score: 0.4
+  min_margin: 0.05

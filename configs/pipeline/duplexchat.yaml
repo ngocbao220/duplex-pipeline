@@ -6,6 +6,6 @@ sample_rate: 24000
 # Phase 2: Separation by DialogueSidon
 separation:
   backend: dialoguesidon
-  chunk: 60.0
+  chunk: 120.0
   num_steps: 30
   model: ${env.paths.dialoguesidon}

@@ -69,15 +69,18 @@ def vad_segments_from_diarization(
 
 
 def turns_from_diarization(segments: Iterable[dict]) -> list[dict]:
-    """Merge consecutive segments of the same speaker into turns if they overlap or touch."""
+    """Keep silence between turns, even when the next speaker is unchanged."""
     sorted_segs = sorted(
         [s for s in segments if float(s["end"]) > float(s["start"])],
         key=lambda s: (float(s["start"]), float(s["end"])),
     )
+    if not sorted_segs:
+        return []
+
     turns: list[dict] = []
     for seg in sorted_segs:
-        start = float(seg["start"])
-        end = float(seg["end"])
+        start = round(float(seg["start"]), 3)
+        end = round(float(seg["end"]), 3)
         speaker = str(seg["speaker"])
         if turns and turns[-1]["speaker"] == speaker and start <= turns[-1]["end"]:
             turns[-1]["end"] = max(turns[-1]["end"], end)

@@ -115,7 +115,9 @@ def test_sommelier_contract_resumes_a_verified_complete_output(tmp_path):
     output = tmp_path / "output"
 
     def successful_adapter(_source, target, _config):
-        return _stereo_wav(target / "stereo_1.wav"), {}
+        stereo = _stereo_wav(target / "stereo_1.wav")
+        stereo.with_suffix(".channels.json").write_text('{"channel_speakers":["A","B"]}')
+        return stereo, {}
 
     first = run_sample("sommelier", {"key": "sample", "mixture": str(mixture)}, output, {}, "code", successful_adapter)
     resumed = run_sample(
@@ -128,6 +130,25 @@ def test_sommelier_contract_resumes_a_verified_complete_output(tmp_path):
     assert not (output / "audio.stereo.wav").exists()
     assert resumed["status"] == "complete"
     assert resumed["resumed"] is True
+
+
+def test_sommelier_output_without_channel_mapping_is_rebuilt(tmp_path):
+    mixture = _wav(tmp_path / "mixture.wav")
+    output = tmp_path / "output"
+    calls = []
+
+    def adapter(_source, target, _config):
+        calls.append(1)
+        stereo = _stereo_wav(target / "stereo_1.wav")
+        stereo.with_suffix(".channels.json").write_text('{"channel_speakers":["A","B"]}')
+        return stereo, {}
+
+    first = run_sample("sommelier", {"key": "sample", "mixture": str(mixture)}, output, {}, "code", adapter)
+    assert first["status"] == "complete"
+    (output / "stereo_1.channels.json").unlink()
+    second = run_sample("sommelier", {"key": "sample", "mixture": str(mixture)}, output, {}, "code", adapter)
+    assert second["status"] == "complete" and second["resumed"] is False
+    assert len(calls) == 2
 
 
 def test_worker_forces_headless_matplotlib_backend_over_notebook_backend(tmp_path, monkeypatch):

@@ -1,0 +1,15 @@
+# Install in a dedicated Python 3.12 environment; set ASR_PYTHON to its interpreter.
+# This runtime is shared by the DuplexChat and Sommelier ASR output steps.
+torch==2.7.1
+torchaudio==2.7.1
+numpy
+soundfile
+scipy
+speechbrain==1.0.3
+whisperx==3.4.2
+sherpa-onnx
+sentencepiece
+huggingface-hub
+transformers>=4.51.0,<=4.53.3
+hydra-core
+omegaconf

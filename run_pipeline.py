@@ -7,6 +7,7 @@ and colored logging strictly aligned with logging.md.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import subprocess
 import sys
@@ -301,6 +302,26 @@ def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
     return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
 
 
+def step_asr(cfg: DictConfig, env: dict[str, str]) -> int:
+    """Transcribe numbered stereo files only after final track reconstruction."""
+    pipeline_name = str(cfg.pipeline.name).lower()
+    if pipeline_name not in {"duplexchat", "sommelier"}:
+        logger.error("ASR supports pipeline=duplexchat or pipeline=sommelier; got %s", pipeline_name)
+        return 1
+    stereo_root = Path(cfg.data.duplex_out_dir if pipeline_name == "duplexchat" else cfg.data.sommelier_out_dir)
+    asr_config = OmegaConf.to_container(cfg.asr, resolve=True)
+    asr_config.pop("python", None)
+    cmd = [str(cfg.asr.python) if cfg.asr.get("python") else sys.executable,
+           str(ROOT_DIR / "scripts" / "run_asr.py"),
+           "--pipeline", pipeline_name,
+           "--stereo-root", str(stereo_root),
+           "--dialogue-root", str(cfg.data.dialogue_dir),
+           "--config-json", json.dumps(asr_config)]
+    if cfg.env.offline:
+        cmd.append("--offline")
+    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+
+
 def step_cholimex(cfg: DictConfig, env: dict[str, str]) -> int:
     """Refine each DuplexChat stereo clip using its matching dialogue mixture."""
     print(section("Cholimex Refinement"))
@@ -490,6 +511,9 @@ def main(cfg: DictConfig) -> None:
     elif step == "sommelier":
         sys.exit(step_sommelier(cfg, env))
 
+    elif step == "asr":
+        sys.exit(step_asr(cfg, env))
+
     elif step == "cholimex":
         sys.exit(step_cholimex(cfg, env))
 
@@ -514,15 +538,24 @@ def main(cfg: DictConfig) -> None:
             if step_separate_dialogue(cfg, env) != 0:
                 logger.error("DuplexChat separation step failed.")
                 sys.exit(1)
+            if step_asr(cfg, env) != 0:
+                logger.error("ASR step failed.")
+                sys.exit(1)
             # Phase 3: Benchmark
             if step_benchmark(cfg, env) != 0:
                 logger.error("Benchmark step failed.")
                 sys.exit(1)
 
         elif pipeline_name == "sommelier":
+            if step_split_dialogue(cfg, env) != 0:
+                logger.error("Dialogue filtering step failed.")
+                sys.exit(1)
             # Phase 2: Sommelier full pipeline
             if step_sommelier(cfg, env) != 0:
                 logger.error("Sommelier step failed.")
+                sys.exit(1)
+            if step_asr(cfg, env) != 0:
+                logger.error("ASR step failed.")
                 sys.exit(1)
             # Phase 3: Benchmark
             if step_benchmark(cfg, env) != 0:
@@ -546,7 +579,7 @@ def main(cfg: DictConfig) -> None:
         logger.info("All pipeline phases completed successfully.")
 
     else:
-        logger.error("Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | benchmark | topic_map", step)
+        logger.error("Unknown step '%s'. Allowed: all | convert | split_dialogue | separate_dialogue | sommelier | cholimex | asr | benchmark | topic_map", step)
         sys.exit(1)
 
 

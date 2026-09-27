@@ -68,7 +68,11 @@ def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
-    if not any(getattr(h, "_pipeline_style", False) for h in logger.handlers):
+    console_handlers = [h for h in logger.handlers if getattr(h, "_pipeline_style", False)]
+    if console_handlers:
+        for handler in console_handlers:
+            handler.stream = sys.stdout
+    else:
         handler = logging.StreamHandler(sys.stdout)
         handler._pipeline_style = True  # type: ignore[attr-defined]
         handler.setFormatter(_ColorFormatter())

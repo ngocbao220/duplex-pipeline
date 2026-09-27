@@ -10,6 +10,7 @@ paths:
   dialoguesidon: sarulab-speech/DialogueSidon
   dnsmos: /kaggle/input/models/ngocbaotrinhtuan/dnsmos/pytorch/dnsmos/1
   speechbrain: speechbrain/spkrec-ecapa-voxceleb
+  silero_vad: snakers4/silero-vad
   nisqa: ${env.paths.base_models}/nisqa.tar
   squim: ${env.paths.base_models}/squim_objective_dns2020.pth
   whisper: openai/whisper-small

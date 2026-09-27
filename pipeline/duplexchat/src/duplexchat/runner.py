@@ -17,7 +17,6 @@ import torch
 from core.orchestration.logging_style import StepTimer, get_logger, section
 from core.outputs import (
     turns_from_diarization,
-    vad_segments_from_diarization,
     write_json,
     write_label_file,
 )
@@ -355,16 +354,11 @@ def split_valid_dialogues(
     phase_times["diarization"] = timer.elapsed
     _release(diarizer)
 
-    # Save speakers, VAD and json for the entire audio by default
-    source_vad_segments = vad_segments_from_diarization(segments, duration_sec=audio_duration_sec)
+    # Save speakers and json for the entire audio by default
     source_turns = turns_from_diarization(segments)
     write_label_file(
         output_root / "speakers.txt",
         ((segment["start"], segment["end"], segment["speaker"]) for segment in segments),
-    )
-    write_label_file(
-        output_root / "vad.txt",
-        ((segment["start"], segment["end"], segment.get("label", "speech")) for segment in source_vad_segments),
     )
     write_json(
         output_root / "diarization.json",
@@ -373,7 +367,6 @@ def split_valid_dialogues(
             "duration_sec": audio_duration_sec,
             "segments": segments,
             "turns": source_turns,
-            "vad_segments": source_vad_segments,
         },
     )
 
@@ -381,10 +374,6 @@ def split_valid_dialogues(
         write_label_file(
             phase_dir / "phase_02_diarization" / "speakers.txt",
             ((segment["start"], segment["end"], segment["speaker"]) for segment in segments),
-        )
-        write_label_file(
-            phase_dir / "phase_02_diarization" / "vad.txt",
-            ((segment["start"], segment["end"], segment.get("label", "speech")) for segment in source_vad_segments),
         )
 
     summary = dialogue_filter_summary(
@@ -483,17 +472,12 @@ def split_valid_dialogues(
             if float(segment["end"]) > dialogue.start and float(segment["start"]) < dialogue.end
         ]
         dialogue_duration = dialogue.end - dialogue.start
-        dialogue_vad = vad_segments_from_diarization(dialogue_segments, duration_sec=dialogue_duration)
         dialogue_turns = turns_from_diarization(dialogue_segments)
 
         # Write per-dialogue label files (txt) and structured metadata (json)
         write_label_file(
             output_root / f"speakers_{output_dialogue_idx}.txt",
             ((seg["start"], seg["end"], seg["speaker"]) for seg in dialogue_segments),
-        )
-        write_label_file(
-            output_root / f"vad_{output_dialogue_idx}.txt",
-            ((seg["start"], seg["end"], seg.get("label", "speech")) for seg in dialogue_vad),
         )
         write_json(
             output_root / f"dialogue_{output_dialogue_idx}.json",
@@ -507,7 +491,7 @@ def split_valid_dialogues(
                 "reason": dialogue.reason,
                 "segments": dialogue_segments,
                 "turns": dialogue_turns,
-                "vad_segments": dialogue_vad,
+                "speaker_turns": dialogue_turns,
             },
         )
 
@@ -522,7 +506,6 @@ def split_valid_dialogues(
             "reason": dialogue.reason,
             "speaker_turns": dialogue_turns,
             "speaker_segments": dialogue_segments,
-            "vad_segments": dialogue_vad,
         })
         candidate_dialogues.append({
             "candidate_index": index + 1,

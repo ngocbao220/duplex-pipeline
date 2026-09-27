@@ -334,7 +334,8 @@ def _reconstruct_tracks(source: Path, manifest_path: Path, output: Path) -> Path
 
     target_rate = 24000
     import torch
-    stacked = np.stack([audio for _, audio in sorted(tracks.items())], axis=0)
+    speaker_order = sorted(tracks)
+    stacked = np.stack([tracks[speaker] for speaker in speaker_order], axis=0)
     if rate != target_rate:
         tensor = torch.from_numpy(stacked)
         resampled = torch.nn.functional.interpolate(
@@ -348,4 +349,8 @@ def _reconstruct_tracks(source: Path, manifest_path: Path, output: Path) -> Path
         out_rate = rate
 
     sf.write(stereo, out_samples, out_rate, subtype="PCM_16")
+    stereo.with_suffix(".channels.json").write_text(
+        json.dumps({"channel_speakers": speaker_order}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
     return stereo

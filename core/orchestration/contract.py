@@ -99,6 +99,14 @@ def validate_duplexchat_stereo_files(stereo_files: list[str | Path]) -> int:
     return len(stereo_files)
 
 
+def validate_sommelier_channel_mapping(stereo: Path) -> list[str]:
+    sidecar = stereo.with_suffix(".channels.json")
+    order = json.loads(sidecar.read_text(encoding="utf-8"))["channel_speakers"]
+    if not isinstance(order, list) or len(order) != 2 or not all(isinstance(name, str) and name for name in order) or len(set(order)) != 2:
+        raise ValueError(f"Invalid Sommelier channel mapping: {sidecar}")
+    return order
+
+
 def validate_output(pipeline: str, source: Path, stereo: Path | None, metadata: dict) -> float:
     if pipeline == "duplexchat":
         validate_duplexchat_stereo_files(metadata["stereo_files"])
@@ -112,6 +120,8 @@ def validate_output(pipeline: str, source: Path, stereo: Path | None, metadata: 
         )
     if stereo is None:
         raise ValueError("Full-input output requires a stereo WAV")
+    if pipeline == "sommelier":
+        validate_sommelier_channel_mapping(stereo)
     return validate_stereo(source, stereo)
 
 
@@ -134,6 +144,7 @@ def reusable(pipeline: str, output: Path, identity: str, source: Path) -> dict |
                 return None
         elif pipeline == "sommelier":
             stereo = output / result["stereo_path"]
+            validate_sommelier_channel_mapping(stereo)
             validate_stereo(source, stereo)
             if result['audio_sha256'] != sha256(stereo):
                 return None

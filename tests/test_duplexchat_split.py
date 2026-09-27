@@ -132,13 +132,12 @@ def test_split_valid_dialogues_exports_manifest_and_wavs(monkeypatch, tmp_path):
     assert (output_root / "manifest.json").is_file()
     assert (output_root / "dialogue_1.wav").is_file()
     assert (output_root / "speakers.txt").is_file()
-    assert (output_root / "vad.txt").is_file()
     assert (output_root / "diarization.json").is_file()
     assert (output_root / "speakers_1.txt").is_file()
-    assert (output_root / "vad_1.txt").is_file()
     assert (output_root / "dialogue_1.json").is_file()
+    assert not (output_root / "vad.txt").exists()
+    assert not (output_root / "vad_1.txt").exists()
     assert (output_root / "speakers_1.txt").read_text() == "0.000\t6.000\tA\n6.000\t12.000\tB\n"
-    assert (output_root / "vad_1.txt").read_text() == "0.000\t12.000\tspeech\n"
     assert "reason" in manifest["dialogues"][0]
     assert "Two-speaker dialogue accepted" in manifest["dialogues"][0]["reason"]
     assert manifest["dialogues"][0]["speaker_turns"] == [
