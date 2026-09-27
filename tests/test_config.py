@@ -178,6 +178,49 @@ def test_kaggle_dev_config_paths():
     assert dev_cfg["offline"] is False
 
 
+def test_sommelier_dev_cli_overrides_resolve_environment_paths():
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    config_dir = str(Path(__file__).resolve().parents[1] / "configs")
+    overrides = [
+        "step=separate_stereo",
+        "pipeline=sommelier",
+        "env=dev",
+        "gpu=0",
+        "data.source=youtube",
+        "data.dialogue_dir=/kaggle/input/datasets/ngocbaotrinhtuan/split-dialogue-nemotron/nemotron",
+        "optimization.workers=2",
+    ]
+
+    with initialize_config_dir(version_base=None, config_dir=config_dir):
+        cfg = compose(config_name="config", overrides=overrides)
+
+    resolved = OmegaConf.to_container(cfg, resolve=True)
+    assert resolved["env"]["name"] == "dev"
+    assert resolved["env"]["paths"]["base_data"] == "/kaggle/input/datasets/ngocbaotrinhtuan"
+    assert resolved["data"]["crawl_dir"] == "/kaggle/input/datasets/ngocbaotrinhtuan/crawl"
+
+
+def test_data_paths_resolve_when_environment_omits_base_data():
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf, open_dict
+
+    config_dir = str(Path(__file__).resolve().parents[1] / "configs")
+    overrides = ["env=dev", "step=separate_stereo", "pipeline=sommelier"]
+
+    with initialize_config_dir(version_base=None, config_dir=config_dir):
+        cfg = compose(config_name="config", overrides=overrides)
+
+    with open_dict(cfg.env.paths):
+        del cfg.env.paths["base_data"]
+    resolved = OmegaConf.to_container(cfg, resolve=True)
+
+    assert resolved["data"]["base_dir"] == "data"
+    assert resolved["data"]["crawl_dir"] == "data/crawl"
+    assert resolved["data"]["raw_dir"] == "data/raw/youtube"
+
+
 def test_server_config_declares_explicit_sommelier_local_models():
     root = Path(__file__).resolve().parents[1]
     import yaml

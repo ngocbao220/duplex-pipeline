@@ -18,8 +18,9 @@ dry_run: false          # Print execution commands without running
 # Dataset & Directory Paths
 data:
   source: youtube       # Sub-corpus name (e.g. youtube, podcast_index)
-  crawl_dir: ${env.paths.base_data}/crawl
-  raw_dir: ${env.paths.base_data}/raw/${data.source}
+  base_dir: ${oc.select:env.paths.base_data,${oc.env:DATA_ROOT,data}}
+  crawl_dir: ${data.base_dir}/crawl
+  raw_dir: ${data.base_dir}/raw/${data.source}
   dialogue_dir: ${env.paths.base_output}/dialogue/${data.source}
   duplex_out_dir: ${env.paths.base_output}/duplexchat/${data.source}
   sommelier_out_dir: ${env.paths.base_output}/sommelier/${data.source}
