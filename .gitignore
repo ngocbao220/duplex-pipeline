@@ -97,3 +97,5 @@ pipeline/sommelier/vendor/podcast_pipeline/output/
 nemo-wheelhouse
 transcripts/
 manifest.json
+
+env_uv.sh

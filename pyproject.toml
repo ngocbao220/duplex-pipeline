@@ -5,45 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "duplex-pipelines"
 version = "0.1.0"
-description = "Three isolated two-speaker separation pipelines"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    # Shared orchestration and benchmark primitives only. Each pipeline owns
-    # its incompatible Torch/NeMo runtime in pipeline/*/pyproject.toml.
-    "hydra-core",
-    "numpy",
-    "omegaconf",
-    "soundfile",
-    "torch>=2.7.0,<=2.8.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest==8.4.1",
-]
-cholimex = [
-    "speechbrain==1.0.3",
-]
-duplexchat = [
-    "speechbrain==1.0.3",
-    "demucs==4.0.1",
-]
-diarization-pyannote = [
-    "pyannote.audio==4.0.7",
-]
-diarization-sortformer = [
-    "Cython==3.1.2",
-    "packaging==24.2",
-    "nemo_toolkit[asr] @ git+https://github.com/NVIDIA-NeMo/Speech.git@ca3f93a516ff172e32951928aea6f96a977a7600",
-]
-separation-dialoguesidon = [
-    "diffusers==0.30.0",
-    "huggingface-hub>=0.34.0,<1.0",
-]
-separation-sepformer = [
-    "speechbrain==1.0.3",
-]
 
 [tool.setuptools.packages.find]
 where = ["."]
