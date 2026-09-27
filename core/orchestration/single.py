@@ -17,9 +17,11 @@ def run_single(name: str, source: Path, output: Path, debug: bool, separate_chun
                diarization_model: str | None = None,
                separation_model: str | None = None) -> int:
     """Run one adapter without reference audio."""
-    from core.config import load_config
+    cfg = None
+    if name == "cholimex":
+        from core.config import Config
 
-    cfg = load_config(ROOT / "configs/config.yaml")
+        cfg = Config()
     args = SimpleNamespace(debug=debug, separate_chunk=separate_chunk, device_ids=device_ids,
                            filter_music=filter_music, music_model=music_model,
                            diarization_backend=diarization_backend, diarization_model=diarization_model,

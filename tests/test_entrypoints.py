@@ -34,6 +34,33 @@ def test_duplexchat_cli_uses_conversation_mode_by_default():
     assert args.separate_chunk == 120.0
 
 
+def test_sommelier_single_does_not_load_hydra_config_as_runtime_config(tmp_path, monkeypatch):
+    import json
+
+    import core.config
+    import core.orchestration.single as single
+
+    def reject_shared_config(*_args, **_kwargs):
+        raise AssertionError("single pipeline must not parse Hydra's root config as runtime config")
+
+    monkeypatch.setattr(core.config, "load_config", reject_shared_config)
+
+    def complete_launch(_name, request, _run_dir):
+        result_path = Path(request["results"])
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text(json.dumps([{"status": "complete"}]), encoding="utf-8")
+        assert request["config"]["name"] == "sommelier"
+        return 0
+
+    monkeypatch.setattr(single, "launch_pipeline", complete_launch)
+    result = single.run_single(
+        "sommelier", tmp_path / "dialogue_2.wav", tmp_path / "out" / "dialogue_2",
+        debug=False, separate_chunk=120.0, device_ids=None,
+    )
+
+    assert result == 0
+
+
 def test_duplexchat_cli_exposes_separation_chunk():
     parser = build_pipeline_parser("duplexchat")
 
