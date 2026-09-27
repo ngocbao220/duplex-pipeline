@@ -47,3 +47,29 @@ def test_pyannote_loader_uses_supported_auth_parameter(monkeypatch, auth_paramet
     assert captured["checkpoint"] == "/model"
     assert captured[auth_parameter] == "test-token"
     assert captured["device"] == "cpu"
+
+
+@pytest.mark.parametrize("offline", [False, True])
+def test_speechbrain_loader_omits_unsupported_local_files_flag(monkeypatch, offline, tmp_path):
+    captured = {}
+
+    class FakeEncoderClassifier:
+        @classmethod
+        def from_hparams(cls, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    local_model = tmp_path / "spkrec-ecapa-voxceleb"
+    if offline:
+        local_model.mkdir()
+    monkeypatch.setattr(diarization_backend, "enforce_offline_mode", lambda: None)
+    monkeypatch.setattr(diarization_backend, "_load_encoder_classifier", lambda: FakeEncoderClassifier)
+    resolved_model = local_model if offline else "speechbrain/spkrec-ecapa-voxceleb"
+    monkeypatch.setattr(diarization_backend, "resolve_local_model_path", lambda *_a, **_k: (resolved_model, offline))
+    monkeypatch.setattr(diarization_backend, "is_offline_mode", lambda: offline)
+
+    diarization_backend.SpeechBrainEmbeddingExtractor("cpu")
+
+    assert captured["source"] == str(resolved_model)
+    assert captured["run_opts"] == {"device": "cpu"}
+    assert "local_files_only" not in captured

@@ -633,12 +633,10 @@ class SpeechBrainEmbeddingExtractor:
         local_target, _ = resolve_local_model_path(
             self.model_id, env_var="SPEECHBRAIN_MODEL_PATH", default_subpath="spkrec-ecapa-voxceleb"
         )
-        offline = is_offline_mode()
         self.model = EncoderClassifier.from_hparams(
             source=str(local_target),
             savedir=str(local_target) if Path(local_target).is_dir() else None,
             run_opts={"device": self.device},
-            local_files_only=offline,
         )
 
     def extract(self, wav: torch.Tensor, sample_rate: int) -> torch.Tensor:
