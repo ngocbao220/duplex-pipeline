@@ -32,8 +32,12 @@ def pipeline_config(name, args, cfg):
         config = json.loads(json.dumps(asdict(cfg), default=str))
         config['debug'] = bool(args.debug)
         return config
-    path = ROOT / 'configs/sommelier.json' if name == 'sommelier' else args.duplexchat_config
-    config = json.loads(path.read_text())
+    if name == 'sommelier':
+        import yaml
+
+        config = yaml.safe_load((ROOT / 'configs/pipeline/sommelier.yaml').read_text())
+    else:
+        config = json.loads(args.duplexchat_config.read_text())
     config['debug'] = bool(args.debug)
     if name == 'duplexchat':
         config['separate_chunk'] = float(getattr(args, 'separate_chunk', config.get('separate_chunk', 120.0)))
@@ -88,6 +92,4 @@ def launch_pipeline(name, request, run_dir):
         print(f'[{name}] Cannot start worker: {exc}', flush=True)
         write_json(run_dir / name / 'launch_error.json', {'error': str(exc)})
         return 1
-
-
 

@@ -19,7 +19,7 @@ def run_single(name: str, source: Path, output: Path, debug: bool, separate_chun
     """Run one adapter without reference audio."""
     from core.config import load_config
 
-    cfg = load_config(ROOT / "configs/config.json")
+    cfg = load_config(ROOT / "configs/config.yaml")
     args = SimpleNamespace(debug=debug, separate_chunk=separate_chunk, device_ids=device_ids,
                            filter_music=filter_music, music_model=music_model,
                            diarization_backend=diarization_backend, diarization_model=diarization_model,

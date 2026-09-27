@@ -124,6 +124,19 @@ cholimex:
     assert config.cholimex_overlap_padding == 0.15
 
 
+def test_sommelier_single_config_uses_repository_yaml_profiles():
+    from types import SimpleNamespace
+
+    from core.orchestration.runner import pipeline_config
+
+    config = pipeline_config("sommelier", SimpleNamespace(debug=False), None)
+
+    assert config["name"] == "sommelier"
+    assert config["sample_rate"] == 16000
+    assert config["max_chunk_duration"] == 300.0
+    assert config["debug"] is False
+
+
 def test_dialogue_split_is_decoupled_from_duplexchat():
     root = Path(__file__).resolve().parents[1]
     import yaml
