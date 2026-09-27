@@ -309,7 +309,9 @@ def step_asr(cfg: DictConfig, env: dict[str, str]) -> int:
     if pipeline_name not in {"duplexchat", "sommelier"}:
         logger.error("ASR supports pipeline=duplexchat or pipeline=sommelier; got %s", pipeline_name)
         return 1
-    stereo_root = Path(cfg.data.duplex_out_dir if pipeline_name == "duplexchat" else cfg.data.sommelier_out_dir)
+    stereo_root = Path(cfg.data.stereo_root) if cfg.data.stereo_root else Path(
+        cfg.data.duplex_out_dir if pipeline_name == "duplexchat" else cfg.data.sommelier_out_dir
+    )
     asr_config = OmegaConf.to_container(cfg.asr, resolve=True)
     asr_config.pop("python", None)
     cmd = [str(cfg.asr.python) if cfg.asr.get("python") else sys.executable,

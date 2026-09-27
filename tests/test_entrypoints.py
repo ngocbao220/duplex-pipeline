@@ -61,6 +61,28 @@ def test_sommelier_single_does_not_load_hydra_config_as_runtime_config(tmp_path,
     assert result == 0
 
 
+def test_worker_always_uses_current_interpreter_instead_of_uv(tmp_path, monkeypatch):
+    import core.orchestration.runner as runner
+
+    root = tmp_path / "repo"
+    (root / "pipeline" / "sommelier").mkdir(parents=True)
+    monkeypatch.setattr(runner, "ROOT", root)
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
+    observed = {}
+
+    def capture(command, cwd, log_path, env):
+        observed.update(command=command, cwd=cwd, log_path=log_path, env=env)
+        return 0
+
+    monkeypatch.setattr(runner, "stream_process", capture)
+    run_dir = tmp_path / "run"
+    assert runner.launch_pipeline("sommelier", {"pipeline": "sommelier"}, run_dir) == 0
+
+    assert observed["command"][0] == sys.executable
+    assert observed["cwd"] == root / "pipeline" / "sommelier"
+    assert "UV_PROJECT_ENVIRONMENT" not in observed["env"]
+
+
 def test_duplexchat_cli_exposes_separation_chunk():
     parser = build_pipeline_parser("duplexchat")
 

@@ -26,6 +26,7 @@ data:
   duplex_out_dir: ${data.base_output_dir}/duplexchat/${data.source}
   sommelier_out_dir: ${data.base_output_dir}/sommelier/${data.source}
   cholimex_out_dir: ${data.base_output_dir}/cholimex/${data.source}
+  stereo_root: null
   pattern: "*.wav"
 
 # Shared Runtime Settings

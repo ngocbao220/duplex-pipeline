@@ -202,6 +202,24 @@ def test_sommelier_dev_cli_overrides_resolve_environment_paths():
     assert resolved["data"]["crawl_dir"] == "/kaggle/input/datasets/ngocbaotrinhtuan/crawl"
 
 
+def test_asr_accepts_explicit_stereo_root_override():
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    config_dir = str(Path(__file__).resolve().parents[1] / "configs")
+    stereo_root = "/kaggle/working/duplex-pipeline/outputs/processed/sommelier/youtube"
+    with initialize_config_dir(version_base=None, config_dir=config_dir):
+        cfg = compose(
+            config_name="config",
+            overrides=[
+                "step=asr", "pipeline=sommelier", "env=dev", "gpu=0",
+                "data.source=youtube", f"data.stereo_root={stereo_root}",
+            ],
+        )
+
+    assert OmegaConf.to_container(cfg, resolve=True)["data"]["stereo_root"] == stereo_root
+
+
 def test_data_paths_resolve_when_environment_omits_base_data():
     from hydra import compose, initialize_config_dir
     from omegaconf import OmegaConf, open_dict
