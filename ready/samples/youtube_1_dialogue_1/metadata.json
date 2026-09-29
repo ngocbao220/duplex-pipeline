@@ -1,0 +1,9 @@
+{
+  "sample_id": "youtube_1_dialogue_1",
+  "duration_sec": 861.736,
+  "language": "vi",
+  "text_prompt_left": "You are a friendly partner",
+  "text_prompt_right": "You are a friendly partner",
+  "voice_prompt_left": "voice_prompt_left.wav",
+  "voice_prompt_right": "voice_prompt_right.wav"
+}

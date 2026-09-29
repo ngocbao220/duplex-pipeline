@@ -1,0 +1,12 @@
+[
+  {
+    "speaker": "left",
+    "transcript": "Chào bạn, mình là mô hình tiếng việt",
+    "model": "Internal ASR"
+  },
+  {
+    "speaker": "right",
+    "transcript": "Chào bạn, mình là mô hình tiếng việt",
+    "model": "Internal ASR"
+  }
+]

@@ -44,6 +44,7 @@ class DemucsMusicFilter:
         try:
             from demucs.apply import apply_model
             from demucs.pretrained import get_model
+            from demucs.states import load_model
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "Demucs library is required for music filtering. Install it via `pip install demucs`."
@@ -63,17 +64,22 @@ class DemucsMusicFilter:
         if not model_path and model_name and Path(model_name).exists():
             model_path = model_name
 
-        if model_path and Path(model_path).exists():
-            p = Path(model_path).resolve()
+        if model_path:
+            p = Path(model_path).expanduser().resolve()
+            if not p.exists():
+                raise FileNotFoundError(f"Configured Demucs model path does not exist: {p}")
             if p.is_dir():
-                try:
-                    self.model = get_model(name="htdemucs", repo=p)
-                except Exception:
-                    self.model = get_model(model_name)
-            elif p.is_file():
-                self.model = get_model(str(p))
+                # Demucs repositories contain a model manifest (for example
+                # htdemucs.yaml) and its hashed checkpoint files. Pass the
+                # repository directory to Demucs instead of treating a
+                # checkpoint filename as a model name.
+                self.model = get_model(name=model_name, repo=p)
+            elif p.is_file() and p.suffix == ".th":
+                # A standalone Demucs checkpoint is loaded by states.load_model;
+                # get_model() resolves names inside a model repository.
+                self.model = load_model(p)
             else:
-                self.model = get_model(model_name)
+                raise ValueError(f"Demucs model path must be a repository directory or .th checkpoint: {p}")
         else:
             self.model = get_model(model_name)
 
