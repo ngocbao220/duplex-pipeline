@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import shutil
 import time
 import traceback
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .logging_style import get_logger
@@ -16,6 +18,65 @@ def write_json(path: Path, payload) -> None:
     temporary = path.with_suffix(path.suffix + '.tmp')
     temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str) + '\n')
     temporary.replace(path)
+
+
+def _progress_manifest_lock(path: Path):
+    """Serialize updates from concurrent per-file workers."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.with_name(f".{path.name}.lock")
+    stream = lock.open("a+")
+    fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+    return stream
+
+
+def _refresh_progress_summary(manifest: dict) -> None:
+    items = manifest["items"]
+    counts = {status: sum(item.get("status") == status for item in items)
+              for status in ("pending", "running", "complete", "failed", "orphaned")}
+    input_count = len(items) - counts["orphaned"]
+    manifest["summary"] = {
+        "input_item_count": input_count,
+        "completed_item_count": counts["complete"],
+        "resumed_item_count": sum(item.get("status") == "complete" and item.get("resumed", False) for item in items),
+        "running_item_count": counts["running"],
+        "pending_item_count": counts["pending"],
+        "failed_item_count": counts["failed"],
+        "orphaned_output_count": counts["orphaned"],
+    }
+    if counts["pending"] or counts["running"]:
+        manifest["status"] = "running"
+    elif counts["failed"]:
+        manifest["status"] = "partial"
+    else:
+        manifest["status"] = "complete"
+
+
+def initialize_progress_manifest(path: Path, manifest: dict) -> None:
+    manifest = dict(manifest)
+    manifest["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    _refresh_progress_summary(manifest)
+    write_json(Path(path), manifest)
+
+
+def progress_manifest_item(path: Path, key: str) -> dict:
+    manifest = json.loads(Path(path).read_text(encoding="utf-8"))
+    return next(row for row in manifest["items"] if row["key"] == key)
+
+
+def update_progress_manifest(path: Path, key: str, **changes) -> None:
+    """Atomically update one item and aggregate counts in a shared manifest."""
+    path = Path(path)
+    lock = _progress_manifest_lock(path)
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        item = next(row for row in manifest["items"] if row["key"] == key)
+        item.update(changes)
+        manifest["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+        _refresh_progress_summary(manifest)
+        write_json(path, manifest)
+    finally:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        lock.close()
 
 
 def sha256(path: Path) -> str:

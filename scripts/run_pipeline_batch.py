@@ -28,6 +28,13 @@ except ImportError:
     pass
 
 from core.model_utils import resolve_local_model_path
+from core.orchestration.contract import (
+    initialize_progress_manifest,
+    progress_manifest_item,
+    update_progress_manifest,
+    validate_sommelier_channel_mapping,
+    validate_stereo,
+)
 from core.resource_tuning import GpuMemorySampler, choose_workers_per_gpu, cpu_worker_budget, probe_gpus
 from pipeline.duplexchat.src.duplexchat.model_options import DIARIZATION_MODELS, resolve_model_alias
 
@@ -83,9 +90,111 @@ def _duplexchat_complete(dialogue_dir: Path, output: Path) -> bool:
         if match is None:
             return False
         stereo = output / f"stereo_{match.group(1)}.wav"
-        if not stereo.is_file() or stereo.stat().st_size == 0:
+        if not _valid_separation_output(dialogue, stereo, "duplexchat")[0]:
             return False
     return True
+
+
+def _stereo_output_path(source: Path, input_root: Path, output_root: Path) -> Path:
+    match = re.fullmatch(r"dialogue_(\d+)\.wav", source.name)
+    if match is None:
+        raise ValueError(f"Expected dialogue_N.wav input: {source}")
+    relative_parent = source.relative_to(input_root).parent
+    return output_root / relative_parent / f"stereo_{match.group(1)}.wav"
+
+
+def _valid_separation_output(source: Path, stereo: Path, pipeline: str) -> tuple[bool, str | None]:
+    try:
+        import soundfile as sf
+        info = sf.info(stereo)
+        if info.channels != 2 or info.samplerate != 24_000 or info.frames <= 0:
+            raise ValueError(f"Expected nonempty 24 kHz stereo WAV: {stereo}")
+        validate_stereo(source, stereo)
+        if pipeline == "sommelier":
+            validate_sommelier_channel_mapping(stereo)
+        return True, None
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def _initialize_separation_manifest(
+    input_root: Path, output_root: Path, pipeline: str, sources: list[Path],
+    direct_output_subdir: str | None = None,
+) -> Path:
+    """Rebuild the collection-level manifest from inputs and valid existing outputs."""
+    manifest_path = output_root / "manifest.json"
+    items = []
+    source_by_output = set()
+    for source in sources:
+        output = _stereo_output_path(source, input_root, output_root)
+        if direct_output_subdir is not None:
+            output = output_root / direct_output_subdir / output.name
+        key = (output.relative_to(output_root).parent / source.name).as_posix()
+        if key.startswith("./"):
+            key = key[2:]
+        source_by_output.add(output.relative_to(output_root).as_posix())
+        valid, reason = _valid_separation_output(source, output, pipeline) if output.exists() else (False, None)
+        items.append({
+            "key": key,
+            "input": source.relative_to(input_root).as_posix(),
+            "output": output.relative_to(output_root).as_posix(),
+            "status": "complete" if valid else "pending",
+            "resumed": valid,
+            "duration_seconds": _audio_duration_seconds(source),
+            **({"completed_at_utc": dt.datetime.now(UTC).isoformat()} if valid else {}),
+            **({"existing_output_error": reason} if reason else {}),
+        })
+
+    for stereo in sorted(output_root.rglob("stereo_*.wav")):
+        if any(part.startswith(".") or part in {"debug", "native"} for part in stereo.relative_to(output_root).parts):
+            continue
+        relative = stereo.relative_to(output_root).as_posix()
+        if relative in source_by_output:
+            continue
+        valid = False
+        try:
+            import soundfile as sf
+            info = sf.info(stereo)
+            valid = info.channels == 2 and info.samplerate == 24_000 and info.frames > 0
+            if pipeline == "sommelier" and valid:
+                validate_sommelier_channel_mapping(stereo)
+        except Exception:
+            valid = False
+        items.append({
+            "key": f"orphaned:{relative}",
+            "input": None,
+            "output": relative,
+            "status": "orphaned",
+            "resumed": False,
+            "output_valid": valid,
+        })
+
+    payload = {
+        "schema_version": 1,
+        "step": "separate_stereo",
+        "pipeline": pipeline,
+        "status": "running",
+        "started_at_utc": dt.datetime.now(UTC).isoformat(),
+        "items": items,
+    }
+    initialize_progress_manifest(manifest_path, payload)
+    return manifest_path
+
+
+def _manifest_status(manifest_path: Path, key: str, status: str, **fields) -> None:
+    update_progress_manifest(
+        manifest_path, key, status=status,
+        **({"resumed": False} if status != "complete" else {}), **fields,
+    )
+
+
+def _mark_subdir_unfinished_failed(manifest_path: Path, output_root: Path, output_subdir: Path, error: str) -> None:
+    relative_parent = output_subdir.relative_to(output_root).as_posix()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for item in manifest["items"]:
+        if item.get("input") and Path(item["output"]).parent.as_posix() == relative_parent and item["status"] in {"pending", "running"}:
+            _manifest_status(manifest_path, item["key"], "failed", error=error,
+                             completed_at_utc=dt.datetime.now(UTC).isoformat())
 
 
 def _publish_sommelier_stereo(run_output: Path, collection_output: Path, dialogue: Path) -> Path:
@@ -115,6 +224,56 @@ def _publish_sommelier_stereo(run_output: Path, collection_output: Path, dialogu
     os.link(channel_source, channel_temporary)
     os.replace(channel_temporary, channel_target)
     return target
+
+
+def _run_sommelier_item(
+    dialogue: Path, input_root: Path, output_root: Path, manifest_path: Path,
+    run_output: Path, env: dict[str, str], index: int, total: int,
+) -> dict:
+    key = dialogue.relative_to(input_root).as_posix()
+    stereo = _stereo_output_path(dialogue, input_root, output_root)
+    item = progress_manifest_item(manifest_path, key)
+    if item.get("status") == "complete" and _valid_separation_output(dialogue, stereo, "sommelier")[0]:
+        return {**_resumed_timing(dialogue, stereo), "resumed": True}
+
+    started = dt.datetime.now(UTC)
+    _manifest_status(manifest_path, key, "running", started_at_utc=started.isoformat(), error=None)
+    command = [
+        sys.executable, "-m", "sommelier", "single",
+        "--input", str(dialogue), "--output-dir", str(run_output),
+    ]
+    try:
+        timing = _timed_subprocess(command, dialogue, run_output, env)
+        if timing["exit_code"] == 0:
+            stereo = _publish_sommelier_stereo(run_output, output_root / dialogue.relative_to(input_root).parent, dialogue)
+            valid, reason = _valid_separation_output(dialogue, stereo, "sommelier")
+            if not valid:
+                raise ValueError(f"Sommelier published invalid stereo output: {reason}")
+            _manifest_status(
+                manifest_path, key, "complete", completed_at_utc=dt.datetime.now(UTC).isoformat(),
+                duration_seconds=_audio_duration_seconds(dialogue), error=None,
+                existing_output_error=None,
+            )
+            timing.update(output=str(stereo.resolve()), status="complete", resumed=False)
+        else:
+            detail = f"Sommelier worker exited with code {timing['exit_code']}"
+            _manifest_status(manifest_path, key, "failed", error=detail,
+                             completed_at_utc=dt.datetime.now(UTC).isoformat())
+            timing.update(status="failed", error=detail, resumed=False)
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        _manifest_status(manifest_path, key, "failed", error=detail,
+                         completed_at_utc=dt.datetime.now(UTC).isoformat())
+        now = dt.datetime.now(UTC).isoformat()
+        timing = {
+            "input": str(dialogue.resolve()), "output": str(stereo.resolve()),
+            "started_at_utc": started.isoformat(), "ended_at_utc": now,
+            "elapsed_seconds": 0.0, "audio_seconds": _audio_duration_seconds(dialogue),
+            "real_time_factor": None, "audio_seconds_per_wall_second": None,
+            "exit_code": 1, "status": "failed", "error": detail, "resumed": False,
+        }
+    print(f"[{index}/{total}] {dialogue.name}: {timing['status']}")
+    return timing
 
 
 def _cholimex_complete(output: Path, conversation_idx: int) -> bool:
@@ -1019,12 +1178,23 @@ def run_batch():
     elif args.step == "separate_dialogue":
         # Can take a directory containing dialogue subfolders or direct dialogue files
         subdirs = sorted([d for d in input_dir.iterdir() if d.is_dir()])
+        direct_input = not subdirs
         if not subdirs:
             if list(input_dir.glob("dialogue_*.wav")):
                 subdirs = [input_dir]
             else:
                 print(f"No dialogue subdirectories or files found in {input_dir}")
+                if not args.dry_run:
+                    _initialize_separation_manifest(input_dir, output_dir, "duplexchat", [])
                 return
+
+        source_files = [wav for directory in subdirs for wav in sorted(directory.glob("dialogue_*.wav"))]
+        manifest_path = None
+        if not args.dry_run:
+            manifest_path = _initialize_separation_manifest(
+                input_dir, output_dir, "duplexchat", source_files,
+                direct_output_subdir=input_dir.name if direct_input else None,
+            )
 
         print(f"=== Running separate_dialogue on {len(subdirs)} dialogue folders from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
         if args.dry_run:
@@ -1067,7 +1237,6 @@ def run_batch():
                 if _duplexchat_complete(sdir, sub_out):
                     print(f"[RESUMED] {sdir.name}: complete DuplexChat output at {sub_out}")
                     return _resumed_timing(sdir, sub_out)
-                _archive_incomplete_output(sub_out)
 
                 worker_env = dict(env)
                 if target_gpu != "cpu":
@@ -1079,11 +1248,24 @@ def run_batch():
                     gpu_tag = "[CPU] "
 
                 cmd = [sys.executable, "-m", "duplexchat", "separate_dialogue", "--input", str(sdir), "--output-dir", str(sub_out), *dev_args, "--separation-chunk", str(args.separation_chunk)]
+                cmd.extend(["--progress-manifest", str(manifest_path)])
                 if args.separation_model:
                     cmd.extend(["--separation-model", str(args.separation_model.resolve())])
                 print(f"[{idx}/{len(subdirs)}] {gpu_tag}{sdir.name} -> {sub_out.name}")
                 source = source_files[0] if len(source_files) == 1 else sdir
-                timing = _timed_subprocess(cmd, source, sub_out, worker_env)
+                try:
+                    timing = _timed_subprocess(cmd, source, sub_out, worker_env)
+                except Exception as exc:
+                    now = dt.datetime.now(UTC).isoformat()
+                    timing = {
+                        "input": str(source.resolve()), "output": str(sub_out.resolve()),
+                        "started_at_utc": now, "ended_at_utc": now,
+                        "elapsed_seconds": 0.0,
+                        "audio_seconds": _audio_duration_seconds(source),
+                        "real_time_factor": None, "audio_seconds_per_wall_second": None,
+                        "exit_code": None, "status": "failed",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
                 if len(source_files) > 1:
                     durations = [_audio_duration_seconds(path) for path in source_files]
                     audio_seconds = sum(value for value in durations if value is not None)
@@ -1092,6 +1274,11 @@ def run_batch():
                     timing["audio_seconds_per_wall_second"] = audio_seconds / timing["elapsed_seconds"] if audio_seconds and timing["elapsed_seconds"] else None
                 if timing["exit_code"] != 0:
                     print(f"Error processing {sdir.name} (exit code {timing['exit_code']})")
+                if timing["exit_code"] != 0:
+                    item_error = timing.get("error") or f"DuplexChat worker exited with code {timing['exit_code']}"
+                else:
+                    item_error = "DuplexChat worker completed without publishing this output"
+                _mark_subdir_unfinished_failed(manifest_path, output_dir, sub_out, item_error)
                 return timing
 
             timing_items, resource_plan = _run_gpu_items(
@@ -1106,6 +1293,24 @@ def run_batch():
             return int(m.group(1)) if m else 0
 
         subdirs = sorted([d for d in input_dir.iterdir() if d.is_dir()])
+        if subdirs:
+            source_groups = {
+                sdir: sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
+                or sorted(list(sdir.glob(args.pattern)), key=_dialogue_key)
+                for sdir in subdirs
+            }
+        else:
+            source_groups = {
+                input_dir: sorted(list(input_dir.glob("dialogue_*.wav")), key=_dialogue_key)
+                or sorted(list(input_dir.glob(args.pattern)), key=_dialogue_key)
+            }
+        sommelier_sources = [source for group in source_groups.values() for source in group]
+        sommelier_manifest = None
+        if not args.dry_run:
+            sommelier_manifest = _initialize_separation_manifest(
+                input_dir, output_dir, "sommelier", sommelier_sources,
+            )
+
         if subdirs:
             print(f"=== Running Sommelier on {len(subdirs)} dialogue folders from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
             if args.dry_run:
@@ -1145,9 +1350,7 @@ def run_batch():
                         else:
                             gpu_tag = "[CPU] "
 
-                        dialogue_files = sorted(list(sdir.glob("dialogue_*.wav")), key=_dialogue_key)
-                        if not dialogue_files:
-                            dialogue_files = sorted(list(sdir.glob(args.pattern)))
+                        dialogue_files = source_groups[sdir]
                         if not dialogue_files:
                             print(f"[{idx}/{len(subdirs)}] {gpu_tag}No audio clips found in {sdir.name}")
                             return []
@@ -1156,18 +1359,11 @@ def run_batch():
                         sub_timings = []
                         for d_idx, dwav in enumerate(dialogue_files, start=1):
                             run_out = sub_out / ".runs" / dwav.stem
-                            cmd = [
-                                sys.executable, "-m", "sommelier", "single",
-                                "--input", str(dwav),
-                                "--output-dir", str(run_out)
-                            ]
-                            print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
-                            timing = _timed_subprocess(cmd, dwav, sub_out, worker_env)
-                            if timing["exit_code"] == 0:
-                                _publish_sommelier_stereo(run_out, sub_out, dwav)
+                            timing = _run_sommelier_item(
+                                dwav, input_dir, output_dir, sommelier_manifest,
+                                run_out, worker_env, d_idx, len(dialogue_files),
+                            )
                             sub_timings.append(timing)
-                            if timing["exit_code"] != 0:
-                                print(f"Error processing {dwav.name} (exit code {timing['exit_code']})")
                         return sub_timings
                     finally:
                         gpu_queue.put(target_gpu)
@@ -1177,9 +1373,7 @@ def run_batch():
                     for r in results:
                         timing_items.extend(r)
         else:
-            dialogue_files = sorted(list(input_dir.glob("dialogue_*.wav")), key=_dialogue_key)
-            if not dialogue_files:
-                dialogue_files = sorted(list(input_dir.glob(args.pattern)))
+            dialogue_files = source_groups[input_dir]
             if not dialogue_files:
                 print(f"No files matching '{args.pattern}' found in {input_dir}")
                 return
@@ -1200,18 +1394,10 @@ def run_batch():
                     idx, wav = item
                     sub_out = output_dir / ".runs" / wav.stem
                     sub_out.mkdir(parents=True, exist_ok=True)
-                    cmd = [
-                        sys.executable, "-m", "sommelier", "single",
-                        "--input", str(wav),
-                        "--output-dir", str(sub_out)
-                    ]
-                    print(f"[{idx}/{len(dialogue_files)}] {wav.name} -> {sub_out.name}")
-                    timing = _timed_subprocess(cmd, wav, sub_out, env)
-                    if timing["exit_code"] == 0:
-                        _publish_sommelier_stereo(sub_out, output_dir, wav)
-                    if timing["exit_code"] != 0:
-                        print(f"Error processing {wav.name} (exit code {timing['exit_code']})")
-                    return timing
+                    return _run_sommelier_item(
+                        wav, input_dir, output_dir, sommelier_manifest,
+                        sub_out, env, idx, len(dialogue_files),
+                    )
 
                 with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
                     timing_items = list(pool.map(_process_sommelier_single, enumerate(dialogue_files, start=1)))

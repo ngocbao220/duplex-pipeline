@@ -99,3 +99,5 @@ transcripts/
 manifest.json
 
 env_uv.sh
+
+all_asr_results

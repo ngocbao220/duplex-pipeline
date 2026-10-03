@@ -4,6 +4,7 @@ Inputs: Two separated waveforms, output naming and model metadata.
 Outputs: Flat production stereo WAVs or per-conversation debug WAVs.
 """
 from pathlib import Path
+import os
 
 import torch
 
@@ -40,5 +41,10 @@ def write_conversation_stereo(
         stereo = conversation_dir / f"stereo_{number}.wav"
     else:
         stereo = output_dir / f"stereo_{number}.wav"
-    save_stereo_wav(stereo, first_channel, second_channel, OUTPUT_SAMPLE_RATE)
+    temporary = stereo.with_name(f".{stereo.stem}.{os.getpid()}.tmp.wav")
+    try:
+        save_stereo_wav(temporary, first_channel, second_channel, OUTPUT_SAMPLE_RATE)
+        os.replace(temporary, stereo)
+    finally:
+        temporary.unlink(missing_ok=True)
     return stereo

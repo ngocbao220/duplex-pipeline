@@ -1,12 +1,21 @@
 import json
 import sys
 import types
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
-from core.orchestration.contract import run_sample, validate_conversation_collection, validate_duplexchat_stereo_files, validate_stereo
+from core.orchestration.contract import (
+    initialize_progress_manifest,
+    run_sample,
+    update_progress_manifest,
+    validate_conversation_collection,
+    validate_duplexchat_stereo_files,
+    validate_stereo,
+)
+from core.orchestration.cli import run_pipeline_command
 from core.orchestration import worker
 from core.orchestration.process import stream_process
 
@@ -34,6 +43,50 @@ def test_core_contract_requires_one_timeline_aligned_stereo_output(tmp_path):
         assert "timeline" in str(error)
     else:
         raise AssertionError("short track must fail validation")
+
+
+def test_progress_manifest_updates_are_atomic_and_keep_concurrent_items(tmp_path):
+    path = tmp_path / "manifest.json"
+    initialize_progress_manifest(path, {
+        "schema_version": 1,
+        "items": [{"key": f"item_{i}", "status": "pending", "resumed": False} for i in range(12)],
+    })
+
+    def complete(index):
+        update_progress_manifest(path, f"item_{index}", status="complete", resumed=False)
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(complete, range(12)))
+
+    manifest = json.loads(path.read_text())
+    assert manifest["status"] == "complete"
+    assert manifest["summary"]["completed_item_count"] == 12
+    assert {item["status"] for item in manifest["items"]} == {"complete"}
+
+
+def test_duplexchat_separation_cli_forwards_progress_manifest(monkeypatch, tmp_path):
+    package = types.ModuleType("duplexchat")
+    package.__path__ = []
+    runner = types.ModuleType("duplexchat.runner")
+    captured = {}
+
+    def separate_dialogue_files(*args, **kwargs):
+        captured.update(kwargs)
+        return {"stereo_files": [], "failures": []}
+
+    runner.separate_dialogue_files = separate_dialogue_files
+    monkeypatch.setitem(sys.modules, "duplexchat", package)
+    monkeypatch.setitem(sys.modules, "duplexchat.runner", runner)
+    manifest = tmp_path / "manifest.json"
+
+    result = run_pipeline_command("duplexchat", [
+        "separate_dialogue", "--input", str(tmp_path / "input"),
+        "--output-dir", str(tmp_path / "output"),
+        "--progress-manifest", str(manifest),
+    ])
+
+    assert result == 0
+    assert captured["progress_manifest"] == manifest
 
 
 def test_duplexchat_collection_contract_allows_zero_conversations(tmp_path):

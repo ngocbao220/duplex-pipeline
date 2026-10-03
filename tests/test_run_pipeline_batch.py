@@ -4,6 +4,10 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+import pytest
+import soundfile as sf
+
 from core.resource_tuning import GpuSnapshot
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +62,66 @@ def test_sommelier_publish_keeps_one_numbered_stereo_without_copying_audio(tmp_p
     assert published.stat().st_ino == generated.stat().st_ino
     assert published.with_suffix(".channels.json").read_text() == '{"channel_speakers":["A","B"]}'
     assert not (collection_output / "audio.stereo.wav").exists()
+
+
+def test_separation_manifest_resumes_and_streams_sommelier_items(tmp_path, monkeypatch):
+    batch = _batch_module()
+    input_root = tmp_path / "input"
+    output_root = tmp_path / "sommelier" / "youtube"
+    source_dir = input_root / "youtube_1"
+    source_dir.mkdir(parents=True)
+    for index in (1, 2):
+        sf.write(source_dir / f"dialogue_{index}.wav", np.zeros(24_000), 24_000)
+
+    output_dir = output_root / "youtube_1"
+    output_dir.mkdir(parents=True)
+    sf.write(output_dir / "stereo_1.wav", np.zeros((24_000, 2)), 24_000)
+    (output_dir / "stereo_1.channels.json").write_text('{"channel_speakers":["A","B"]}')
+    sf.write(output_dir / "stereo_2.wav", np.zeros(24_000), 24_000)
+    orphan_dir = output_root / "old_youtube"
+    orphan_dir.mkdir()
+    sf.write(orphan_dir / "stereo_8.wav", np.zeros((24_000, 2)), 24_000)
+    (orphan_dir / "stereo_8.channels.json").write_text('{"channel_speakers":["A","B"]}')
+
+    manifest_path = batch._initialize_separation_manifest(
+        input_root, output_root, "sommelier", sorted(source_dir.glob("dialogue_*.wav")),
+    )
+    manifest = json.loads(manifest_path.read_text())
+    items = {item["key"]: item for item in manifest["items"]}
+    assert manifest_path == output_root / "manifest.json"
+    assert items["youtube_1/dialogue_1.wav"]["status"] == "complete"
+    assert items["youtube_1/dialogue_1.wav"]["resumed"] is True
+    assert items["youtube_1/dialogue_2.wav"]["status"] == "pending"
+    assert items["orphaned:old_youtube/stereo_8.wav"]["status"] == "orphaned"
+    assert manifest["summary"]["input_item_count"] == 2
+    assert manifest["summary"]["resumed_item_count"] == 1
+    assert manifest["summary"]["orphaned_output_count"] == 1
+
+    monkeypatch.setattr(batch, "_timed_subprocess", lambda *args: pytest.fail("valid output should resume"))
+    resumed = batch._run_sommelier_item(
+        source_dir / "dialogue_1.wav", input_root, output_root, manifest_path,
+        output_dir / ".runs" / "dialogue_1", {}, 1, 2,
+    )
+    assert resumed["resumed"] is True
+
+    run_output = output_dir / ".runs" / "dialogue_2"
+
+    def fake_sommelier(command, source, output, env):
+        run_output.mkdir(parents=True, exist_ok=True)
+        sf.write(run_output / "stereo_2.wav", np.zeros((24_000, 2)), 24_000)
+        (run_output / "stereo_2.channels.json").write_text('{"channel_speakers":["A","B"]}')
+        return {"input": str(source), "output": str(output), "exit_code": 0, "status": "complete"}
+
+    monkeypatch.setattr(batch, "_timed_subprocess", fake_sommelier)
+    completed = batch._run_sommelier_item(
+        source_dir / "dialogue_2.wav", input_root, output_root, manifest_path,
+        run_output, {}, 2, 2,
+    )
+    manifest = json.loads(manifest_path.read_text())
+    items = {item["key"]: item for item in manifest["items"]}
+    assert completed["status"] == "complete"
+    assert items["youtube_1/dialogue_2.wav"]["status"] == "complete"
+    assert manifest["summary"]["completed_item_count"] == 2
 
 
 def test_batch_timing_aggregates_steps_and_records_audio_speed(monkeypatch, tmp_path):
@@ -494,11 +558,11 @@ def test_resume_helpers_only_accept_complete_phase_artifacts(tmp_path):
 
     dialogue_dir = tmp_path / "dialogues"
     dialogue_dir.mkdir()
-    (dialogue_dir / "dialogue_1.wav").write_bytes(b"audio")
+    sf.write(dialogue_dir / "dialogue_1.wav", np.zeros(24_000), 24_000)
     duplex_out = tmp_path / "duplex"
     duplex_out.mkdir()
     assert not batch._duplexchat_complete(dialogue_dir, duplex_out)
-    (duplex_out / "stereo_1.wav").write_bytes(b"stereo")
+    sf.write(duplex_out / "stereo_1.wav", np.zeros((24_000, 2)), 24_000)
     assert batch._duplexchat_complete(dialogue_dir, duplex_out)
 
     cholimex_out = tmp_path / "cholimex_1"

@@ -59,6 +59,8 @@ def build_pipeline_parser(name: str) -> argparse.ArgumentParser:
         sep.add_argument("--separation-chunk", "--separate-chunk", dest="separate_chunk", type=float, default=120.0)
         sep.add_argument("--separation-model", type=Path, default=None, help="Verified local DialogueSidon model directory")
         sep.add_argument("--num-steps", type=int, default=30)
+        sep.add_argument("--progress-manifest", type=Path, default=None,
+                         help="Collection-level manifest updated as each dialogue is separated")
         sep.add_argument("--debug", action="store_true")
         validate = commands.add_parser("validate_model", help="Validate a local DialogueSidon bundle without loading it on a GPU.")
         validate.add_argument("--separation-model", type=Path, required=True, help="Local DialogueSidon model directory")
@@ -128,9 +130,10 @@ def run_pipeline_command(name: str, argv: list[str] | None = None) -> int:
             separate_chunk=getattr(args, "separate_chunk", 120.0),
             separation_model=str(args.separation_model.resolve()) if args.separation_model else None,
             debug=getattr(args, "debug", False),
+            progress_manifest=getattr(args, "progress_manifest", None),
         )
         print(f"Done separate_dialogue\n-> Output: {args.output_dir}\n-> Stereo files: {len(result['stereo_files'])}", flush=True)
-        return 0
+        return 1 if result.get("failures") else 0
     if args.command == "validate_model":
         if name != "duplexchat":
             raise AssertionError(f"Unsupported validate_model command for {name}")

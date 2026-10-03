@@ -6,6 +6,7 @@ Outputs: Numbered 24 kHz stereo WAVs, with optional phase-debug artifacts.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import datetime as dt
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ import wave
 
 import torch
 
+from core.orchestration.contract import progress_manifest_item, update_progress_manifest, validate_stereo
 from core.orchestration.logging_style import StepTimer, get_logger, section
 from core.outputs import (
     turns_from_diarization,
@@ -600,6 +602,7 @@ def separate_dialogue_files(
     separate_chunk: float = 120.0,
     separation_model: str | None = None,
     debug: bool = False,
+    progress_manifest: Path | None = None,
 ) -> dict:
     """Takes input dialogue directory (or WAV file) and runs DialogueSidon separation model, generating 24kHz stereo outputs."""
     import time
@@ -646,40 +649,103 @@ def separate_dialogue_files(
     logger.info("+ Output sample rate: 24khz")
     logger.info("")
 
-    models = {device: load_separation_models(device=device, model_id=separation_model) for device in devices}
-
+    output_root.mkdir(parents=True, exist_ok=True)
     rows = []
-    total_audio_sec = 0.0
+    pending = []
+    failures = []
+    manifest_prefix = ""
+    if progress_manifest is not None:
+        progress_manifest = Path(progress_manifest).resolve()
+        try:
+            manifest_prefix = output_root.resolve().relative_to(progress_manifest.parent).as_posix()
+        except ValueError as exc:
+            raise ValueError("DuplexChat output directory must be inside the progress manifest directory") from exc
+        if manifest_prefix == ".":
+            manifest_prefix = ""
+
+    for index, dialogue_wav in enumerate(dialogue_files):
+        match = re.search(r"dialogue_(\d+)", dialogue_wav.stem)
+        conv_index = int(match.group(1)) - 1 if match else index
+        stereo = (output_root / f"stereo_{conv_index + 1}.wav" if not debug else
+                  output_root / "debug" / "phase_03_separation" / f"conversation_{conv_index + 1}" / f"stereo_{conv_index + 1}.wav")
+        key = "/".join(part for part in (manifest_prefix, dialogue_wav.name) if part)
+        if progress_manifest is not None:
+            try:
+                item = progress_manifest_item(progress_manifest, key)
+            except (OSError, ValueError, KeyError, StopIteration):
+                raise RuntimeError(f"Dialogue missing from separation manifest: {key}")
+            if item.get("status") == "complete":
+                valid, _ = _separation_output_is_valid(dialogue_wav, stereo)
+                if valid:
+                    rows.append(stereo)
+                    continue
+        pending.append((index, conv_index, dialogue_wav, stereo, key))
+
+    total_audio_sec = sum(
+        duration for path in dialogue_files
+        if (duration := _audio_duration_seconds(path)) is not None
+    )
+    if not pending:
+        return {
+            "stereo_files": rows,
+            "devices": devices,
+            "dialogue_count": len(dialogue_files),
+            "total_audio_sec": total_audio_sec,
+            "elapsed_sec": 0.0,
+            "rtf": 0.0,
+            "failures": failures,
+        }
+
+    models = {device: load_separation_models(device=device, model_id=separation_model) for device in devices}
     t0 = time.perf_counter()
 
     try:
-        pbar = tqdm(dialogue_files, desc="Separating dialogues", unit="clip")
-        for index, dialogue_wav in enumerate(pbar):
-            crop, sample_rate = load_wav_tensor(dialogue_wav)
-            clip_dur = float(crop.shape[-1] / sample_rate)
-            total_audio_sec += clip_dur
+        pbar = tqdm(pending, desc="Separating dialogues", unit="clip")
+        for index, conv_index, dialogue_wav, stereo, key in pbar:
+            if progress_manifest is not None:
+                update_progress_manifest(
+                    progress_manifest, key, status="running", resumed=False,
+                    started_at_utc=dt.datetime.now(dt.timezone.utc).isoformat(), error=None,
+                )
+            try:
+                crop, sample_rate = load_wav_tensor(dialogue_wav)
+                clip_dur = float(crop.shape[-1] / sample_rate)
 
-            device = devices[index % len(devices)]
-            if torch.cuda.is_available() and device.startswith("cuda"):
-                torch.cuda.set_device(torch.device(device))
+                device = devices[index % len(devices)]
+                if torch.cuda.is_available() and device.startswith("cuda"):
+                    torch.cuda.set_device(torch.device(device))
 
-            first, second, output_rate = separate_waveform(
-                crop, sample_rate, models[device], num_steps, separate_chunk, _no_progress
-            )
+                first, second, output_rate = separate_waveform(
+                    crop, sample_rate, models[device], num_steps, separate_chunk, _no_progress
+                )
 
-            first = _resample(first, output_rate, OUTPUT_SAMPLE_RATE)
-            second = _resample(second, output_rate, OUTPUT_SAMPLE_RATE)
-            mixture = _resample(crop, sample_rate, OUTPUT_SAMPLE_RATE)
-            length = min(first.shape[-1], second.shape[-1], mixture.shape[-1])
-            first = _fit_channel(first, length)
-            second = _fit_channel(second, length)
-            mixture = _fit_channel(mixture, length)
+                first = _resample(first, output_rate, OUTPUT_SAMPLE_RATE)
+                second = _resample(second, output_rate, OUTPUT_SAMPLE_RATE)
+                mixture = _resample(crop, sample_rate, OUTPUT_SAMPLE_RATE)
+                length = min(first.shape[-1], second.shape[-1], mixture.shape[-1])
+                first = _fit_channel(first, length)
+                second = _fit_channel(second, length)
+                mixture = _fit_channel(mixture, length)
 
-            # Preserve dialogue index in stereo file name (e.g. dialogue_10 -> stereo_10)
-            m = re.search(r"dialogue_(\d+)", dialogue_wav.stem)
-            conv_index = int(m.group(1)) - 1 if m else index
-            stereo = write_conversation_stereo(output_root, conv_index, first, second, OUTPUT_SAMPLE_RATE, debug)
-            rows.append(stereo)
+                # Preserve dialogue index in stereo file name (e.g. dialogue_10 -> stereo_10)
+                stereo = write_conversation_stereo(output_root, conv_index, first, second, OUTPUT_SAMPLE_RATE, debug)
+                validate_stereo(dialogue_wav, stereo)
+                rows.append(stereo)
+                if progress_manifest is not None:
+                    update_progress_manifest(
+                        progress_manifest, key, status="complete", resumed=False,
+                        completed_at_utc=dt.datetime.now(dt.timezone.utc).isoformat(),
+                        duration_seconds=clip_dur, error=None, existing_output_error=None,
+                    )
+            except Exception as exc:
+                failures.append({"key": key, "error": f"{type(exc).__name__}: {exc}"})
+                if progress_manifest is not None:
+                    update_progress_manifest(
+                        progress_manifest, key, status="failed", resumed=False,
+                        completed_at_utc=dt.datetime.now(dt.timezone.utc).isoformat(),
+                        error=failures[-1]["error"],
+                    )
+                pbar.write(f"Failed {dialogue_wav.name}: {type(exc).__name__}: {exc}")
     finally:
         for model in models.values():
             _release(model)
@@ -710,4 +776,26 @@ def separate_dialogue_files(
         "total_audio_sec": total_audio_sec,
         "elapsed_sec": elapsed,
         "rtf": rtf,
+        "failures": failures,
     }
+
+
+def _audio_duration_seconds(path: Path) -> float | None:
+    try:
+        import soundfile as sf
+        info = sf.info(path)
+        return info.frames / info.samplerate if info.samplerate and info.frames > 0 else None
+    except Exception:
+        return None
+
+
+def _separation_output_is_valid(source: Path, stereo: Path) -> tuple[bool, str | None]:
+    try:
+        import soundfile as sf
+        info = sf.info(stereo)
+        if info.channels != 2 or info.samplerate != OUTPUT_SAMPLE_RATE or info.frames <= 0:
+            raise ValueError(f"Expected nonempty 24 kHz stereo WAV: {stereo}")
+        validate_stereo(source, stereo)
+        return True, None
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
