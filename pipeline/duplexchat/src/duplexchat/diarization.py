@@ -9,12 +9,28 @@ from .diarization_backend import load_diarization_pipeline, run_diarization
 from core.orchestration.logging_style import get_logger
 
 
-def diarize(audio: Path, output_dir: Path, model: str, backend: str, device: str, chunk: float | str | None, progress):
+def diarize(
+    audio: Path,
+    output_dir: Path,
+    model: str,
+    backend: str,
+    device: str,
+    chunk: float | str | None,
+    progress,
+    speaker_link_threshold: float = 0.7,
+    expected_speakers: int = 2,
+):
     model_instance = load_diarization_pipeline(model, device=device, backend=backend, max_chunk_duration=chunk)
     diagnostics: dict = {}
     try:
         segments = run_diarization(
-            model_instance, audio, max_chunk_dur=chunk, progress_callback=progress, diagnostics=diagnostics,
+            model_instance,
+            audio,
+            max_chunk_dur=chunk,
+            progress_callback=progress,
+            diagnostics=diagnostics,
+            speaker_link_threshold=speaker_link_threshold,
+            expected_speakers=expected_speakers,
         )
     finally:
         progress("close", 0)

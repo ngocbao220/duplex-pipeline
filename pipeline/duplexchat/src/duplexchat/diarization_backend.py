@@ -773,6 +773,8 @@ def run_diarization(
     max_chunk_dur: float | str | None = None,
     progress_callback: Callable[[str, int], None] | None = None,
     diagnostics: dict | None = None,
+    speaker_link_threshold: float = 0.7,
+    expected_speakers: int = 2,
 ) -> list[dict]:
     """
     Chạy diarization bằng cách dùng VAD để cắt audio thành các chunk <= max_chunk_dur,
@@ -853,7 +855,11 @@ def run_diarization(
     # 3. Chạy diarization từng chunk và link nhãn local qua public ECAPA API.
     all_segments = []
     embedding_device = "cuda" if torch.cuda.is_available() else "cpu"
-    linker = GlobalSpeakerLinker(SpeechBrainEmbeddingExtractor(embedding_device))
+    linker = GlobalSpeakerLinker(
+        SpeechBrainEmbeddingExtractor(embedding_device),
+        similarity_threshold=speaker_link_threshold,
+        expected_speakers=expected_speakers,
+    )
     
     for c_start, c_end in chunks:
         # Mở rộng nhẹ chunk để không cắt gắt

@@ -1,0 +1,206 @@
+# @package _global_
+# ==============================================================================
+# CONFIG.FULL.YAML - CẤU HÌNH ĐẦY ĐỦ CHO TOÀN BỘ HỆ THỐNG DUPLEX-PIPELINES
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. ĐIỀU KHIỂN THỰC THI (EXECUTION CONTROLS)
+# ------------------------------------------------------------------------------
+step: all               # Giai đoạn thực thi: all | convert | split_dialogue | separate_stereo | asr | sommelier | cholimex | benchmark | topic_map
+gpu: 0                  # GPU sử dụng: "auto" (tự chọn), chuỗi "0,1" (nhiều GPU), số nguyên 0 hoặc "cpu"
+debug: false            # Giữ lại audio/artifacts trung gian phục vụ debug
+dry_run: false          # In các câu lệnh thực thi ra terminal mà không chạy thực tế
+
+# ------------------------------------------------------------------------------
+# 2. TỐI ƯU HÓA TÀI NGUYÊN & TIẾN TRÌNH (CONCURRENCY & OPTIMIZATION)
+# ------------------------------------------------------------------------------
+optimization:
+  resource_mode: auto          # Chế độ cấp phát worker: "auto" (tự đo VRAM đỉnh), "manual" (dùng cố định giá trị workers)
+  workers: 2                   # Số worker xử lý file song song trên mỗi GPU (dùng cho manual fallback)
+  max_workers_per_gpu: 8       # Giới hạn tối đa số worker trên 1 GPU khi chạy auto-tuning
+  gpu_memory_reserve_ratio: 0.10 # Tỷ lệ VRAM dự phòng an toàn tránh OOM khi auto-tune (0.0 đến 1.0)
+  convert_workers: auto        # Số CPU workers cho ffmpeg convert audio ("auto" = toàn bộ số core CPU)
+  threads_per_worker: 1        # Số luồng CPU tối đa cho mỗi worker process (LƯU Ý: hiện đang gán cứng 1 luồng qua env var OMP/MKL)
+
+# ------------------------------------------------------------------------------
+# 3. THIẾT LẬP RUNTIME DÙNG CHUNG (SHARED RUNTIME SETTINGS)
+# ------------------------------------------------------------------------------
+runtime:
+  device: auto                 # Thiết bị tính toán mặc định: "auto", "cuda", "cpu"
+  allow_cpu_fallback: true     # Cho phép tự động chuyển sang CPU nếu không có CUDA khả dụng
+
+# ------------------------------------------------------------------------------
+# 4. ĐƯỜNG DẪN DỮ LIỆU & THƯ MỤC (DATASET & DIRECTORY PATHS)
+# ------------------------------------------------------------------------------
+data:
+  source: youtube              # Tên tập dữ liệu con (sub-corpus): youtube, podcast_index, ...
+  base_dir: ${oc.select:env.paths.base_data,${oc.env:DATA_ROOT,data}} # Thư mục gốc chứa dữ liệu đầu vào
+  base_output_dir: ${oc.select:env.paths.base_output,${oc.env:OUTPUT_ROOT,outputs/processed}} # Thư mục gốc chứa kết quả đầu ra
+  crawl_dir: ${data.base_dir}/crawl # Thư mục chứa audio crawl thô cần convert
+  raw_dir: ${data.base_dir}/raw/${data.source} # Thư mục chứa file WAV 16kHz mono chuẩn hóa
+  dialogue_dir: ${data.base_output_dir}/dialogue/${data.source} # Thư mục lưu các đoạn hội thoại sau bước split_dialogue
+  duplex_out_dir: ${data.base_output_dir}/duplexchat/${data.source} # Thư mục xuất stereo của pipeline duplexchat
+  sommelier_out_dir: ${data.base_output_dir}/sommelier/${data.source} # Thư mục xuất stereo của pipeline sommelier
+  cholimex_out_dir: ${data.base_output_dir}/cholimex/${data.source} # Thư mục xuất stereo của pipeline cholimex
+  stereo_root: null            # Đường dẫn ghi đè thư mục stereo cho bước asr (nếu null sẽ lấy tự động theo pipeline)
+  pattern: "*.wav"             # Mẫu lọc file audio đầu vào (glob pattern)
+
+# ------------------------------------------------------------------------------
+# 5. CẤU HÌNH MÔI TRƯỜNG & ĐƯỜNG DẪN MODEL (ENVIRONMENT & MODEL PATHS)
+# ------------------------------------------------------------------------------
+env:
+  name: sever                  # Môi trường chạy: "sever" (máy chủ local/offline) hoặc "dev" (Kaggle/cloud)
+  offline: true                # Chế độ chạy offline (không tải model từ internet, yêu cầu model local)
+  paths:
+    base_models: /storage-voice/voice/vdt/baottn/duplex-model-dir # Thư mục gốc chứa tất cả model checkpoints
+    base_data: /storage-voice/voice/vdt/baottn/duplex-data       # Thư mục gốc dữ liệu trên máy chủ
+    base_output: ${env.paths.base_data}/processed                # Thư mục xuất dữ liệu trên máy chủ
+    vietnamese_bi_encoder: ${env.paths.base_models}/vietnamese-bi-encoder # Model embedding tiếng Việt cho topic map
+    dialoguesidon: ${env.paths.base_models}/DialogueSidon       # Model phân tách âm thanh DialogueSidon
+    dnsmos: ${env.paths.base_models}/dnsmos                     # Model đánh giá chất lượng âm thanh DNSMOS
+    speechbrain: ${env.paths.base_models}/spker                 # Checkpoint trích xuất speaker embedding ECAPA-TDNN
+    silero_vad: ${env.paths.base_models}/silero-vad             # Checkpoint Silero VAD nhận diện tiếng nói
+    nisqa: ${env.paths.base_models}/nisqa.tar                   # Checkpoint đánh giá NISQA (benchmark)
+    squim: ${env.paths.base_models}/squim_objective_dns2020.pth # Checkpoint đánh giá Torchaudio SQUIM
+    whisper: /raid/voice/chauhn3/whisper/whisper-large-v3       # Checkpoint Whisper dùng cho LID (nhận diện ngôn ngữ)
+    sortformer: ${env.paths.base_models}/diar_streaming_sortformer_4spk-v2.1 # Checkpoint Sortformer diarization
+    nemotron: ${env.paths.base_models}/Nemotron-3-Diarization.nemo # Checkpoint Nemotron diarization
+    sepreformer: ${env.paths.base_models}/epoch.0180.pth        # Checkpoint SepReformer tách overlap
+    demucs: ${env.paths.base_models}/htdemucs                   # Checkpoint Demucs lọc nhạc nền
+
+
+
+# ------------------------------------------------------------------------------
+# 6. TÁCH & LỌC HỘI THOẠI (DIALOGUE SPLIT & FILTERING - PHASE 1)
+# ------------------------------------------------------------------------------
+dialogue_split:
+  name: default
+  diarization:
+    backend: ${diarization.backend} # Backend diarization kế thừa từ diarization.backend
+    model: ${diarization.model}     # Checkpoint diarization kế thừa từ diarization.model
+  music_filter:
+    enabled: true              # Bật/tắt Demucs để lọc bỏ nhạc nền trước khi tách hội thoại
+    model: htdemucs            # Model Demucs (LƯU Ý: giá trị này chưa được CLI run_pipeline_batch nhận, code dùng htdemucs)
+  lid:
+    enabled: true              # Bật/tắt Language Identification (lọc đúng ngôn ngữ mục tiêu)
+    code: vi                   # Mã ngôn ngữ cần giữ lại (ví dụ: "vi" cho tiếng Việt)
+    model: ${env.paths.whisper} # Model Whisper dùng để detect ngôn ngữ
+    min_prob: 0.5              # Ngưỡng xác suất tối thiểu của ngôn ngữ mục tiêu để giữ lại đoạn hội thoại
+  dialogue:
+    gap_seconds: 5.0           # Khoảng lặng giữa 2 lượt nói tối đa để gộp vào cùng một cuộc hội thoại
+    min_duration_seconds: 10.0 # Thời lượng tối thiểu (giây) của một đoạn hội thoại hợp lệ (dưới mức này sẽ bị loại)
+    max_duration_seconds: 600.0 # Thời lượng tối đa (giây) của một clip hội thoại (quá mức này sẽ cắt nhỏ tại điểm lặng)
+    max_single_speaker_ratio: 0.8 # Tỷ lệ thời gian nói tối đa của 1 người (vượt quá 0.8 bị coi là độc thoại và loại bỏ)
+    preferred_split_pause_seconds: 3.0 # Độ dài khoảng lặng ưu tiên để cắt nhỏ các hội thoại dài (> max_duration)
+    min_split_pause_seconds: 1.5 # Độ dài khoảng lặng tối thiểu cho phép cắt nếu không tìm thấy khoảng lặng ưu tiên
+
+# ------------------------------------------------------------------------------
+# 7. CẤU HÌNH DIARIZATION CHI TIẾT (DIARIZATION SETTINGS)
+# ------------------------------------------------------------------------------
+diarization:
+  backend: sortformer          # Backend phân đoạn người nói: "sortformer", "nemotron", "pyannote"
+  model: ${env.paths.sortformer} # Checkpoint model tương ứng
+  chunk_duration: null         # Độ dài chunk (giây) khi chia file dài để diarize (null = dùng max_chunk_seconds)
+  max_chunk_seconds: full      # Xử lý toàn bộ file không cắt ("full") hoặc giới hạn độ dài chunk theo số giây
+  num_speakers: 2              # Số người nói kỳ vọng (LƯU Ý: chưa truyền xuống CLI split_dialogue, ngầm định 2)
+  speaker_link_threshold: 0.75 # Ngưỡng cosine similarity liên kết người nói giữa các chunk (LƯU Ý: chưa truyền xuống split_dialogue)
+  min_duration_seconds: 0.25   # Thời lượng turn nói tối thiểu (LƯU Ý: chưa truyền xuống CLI split_dialogue)
+  min_silence_seconds: 0.3     # Khoảng lặng tối thiểu giữa các turn (LƯU Ý: chưa truyền xuống CLI split_dialogue)
+  nemo_log_level: ERROR        # Mức ghi log của NeMo toolkit: DEBUG, INFO, WARNING, ERROR (LƯU Ý: chưa truyền xuống CLI)
+  token_env: HUGGINGFACE_TOKEN # Tên biến môi trường chứa HF token (dùng riêng khi backend là pyannote)
+
+# ------------------------------------------------------------------------------
+# 8. CẤU HÌNH PIPELINE TÁCH STEREO (PIPELINE: DUPLEXCHAT | SOMMELIER | CHOLIMEX)
+# ------------------------------------------------------------------------------
+pipeline:
+  name: duplexchat             # Tên pipeline chạy tách stereo: "duplexchat", "sommelier", hoặc "cholimex"
+  sample_rate: 24000           # Tần số lấy mẫu âm thanh stereo ngõ ra (24000Hz cho duplexchat, 16000Hz cho sommelier)
+  separation:
+    backend: dialoguesidon     # Backend tách nguồn: "dialoguesidon"
+    chunk: 120.0               # Độ dài cửa sổ chunk (giây) khi chạy DialogueSidon diffusion
+    num_steps: 30              # Số bước diffusion sampling (LƯU Ý: CLI run_pipeline_batch chưa nhận tham số này, mặc định 30)
+    model: ${env.paths.dialoguesidon} # Đường dẫn model checkpoint DialogueSidon
+
+
+# ------------------------------------------------------------------------------
+# 8b. CẤU HÌNH CHI TIẾT SOMMELIER (DÙNG KHI pipeline.name=sommelier)
+# (LƯU Ý: CLI override từ Hydra chưa truyền xuống Sommelier; runner đọc trực tiếp configs/pipeline/sommelier.yaml)
+# ------------------------------------------------------------------------------
+sommelier_profile:
+  sample_rate: 16000           # Tần số lấy mẫu ngõ ra của Sommelier (16kHz)
+  overlap_threshold: 1.0       # Ngưỡng phát hiện overlap (giây) để kích hoạt mô hình SepReformer
+  speaker_link_threshold: 0.75 # Ngưỡng cosine similarity nối speaker turns giữa các chunk VAD
+  max_chunk_duration: 300.0    # Giới hạn độ dài tối đa mỗi chunk tích lũy Silero VAD (giây, tối đa 5 phút)
+  demucs: false                # Bật/tắt Demucs trong Sommelier (LƯU Ý: sommelier runner đang hardcode --no-demucs)
+  expected_speakers: 2         # Giới hạn số người nói (LƯU Ý: sommelier runner đang hardcode 2 người)
+  checkpoint: ${env.paths.sepreformer} # Checkpoint SepReformer (LƯU Ý: runner đọc qua env var SEPREFORMER)
+  embedding_model: ${env.paths.speechbrain} # Checkpoint trích xuất embedding (LƯU Ý: runner đọc qua env var SPEECHBRAIN_MODEL_PATH)
+
+# ------------------------------------------------------------------------------
+# 8c. CẤU HÌNH CHI TIẾT CHOLIMEX (DÙNG KHI pipeline.name=cholimex)
+# (LƯU Ý: CLI cholimex collection đang đọc trực tiếp configs/config.json - file hiện chưa tồn tại)
+# ------------------------------------------------------------------------------
+cholimex_profile:
+  backchannel_max_duration: 1.0           # Thời lượng tối đa (giây) để coi là từ đệm/tiếng ậm ừ (backchannel)
+  min_vad_duration: 0.0                   # Thời lượng segment VAD tối thiểu để giữ lại
+  vad_onset: null                         # Ngưỡng kích hoạt speech onset cho VAD (null = mặc định)
+  vad_offset: null                        # Ngưỡng ngắt speech offset cho VAD (null = mặc định)
+  vad_padding_ms: 30                      # Padding mở rộng hai đầu segment VAD (mili-giây)
+  merge_gap: 0.0                          # Khoảng lặng tối đa để gộp các segment VAD liên tiếp
+  min_reference_duration: 2.0             # Thời lượng tối thiểu (giây) của reference audio để trích xuất speaker embedding
+  speaker_assignment_mode: relative_similarity # Chế độ gán kênh người nói: "relative_similarity" hoặc "strict_threshold"
+  cosine_similarity_threshold: 0.5        # Ngưỡng cosine similarity tối thiểu để gán kênh (dùng khi strict_threshold)
+  overlap_padding: 0.10                   # Padding thêm vào vùng overlap (giây) trước khi tách
+  proposal_backend: dialoguesidon         # Backend tạo đề xuất tách ban đầu
+  proposal_model: ${env.paths.dialoguesidon} # Đường dẫn checkpoint model đề xuất
+  overlap_separator_backend: sepreformer  # Backend chuyên tách vùng chồng lấn (overlap)
+  overlap_separator_model: ${env.paths.sepreformer} # Đường dẫn checkpoint model tách overlap
+  speaker_embedding_model: ${env.paths.speechbrain} # Checkpoint model trích xuất speaker embedding
+
+# ------------------------------------------------------------------------------
+# 9. TỰ ĐỘNG NHẬN DẠNG TIẾNG NÓI & GIÓNG HÀNG (ASR & ALIGNMENT - PHASE 3)
+# ------------------------------------------------------------------------------
+asr:
+  python: null                 # Đường dẫn Python interpreter của môi trường ASR độc lập (null = dùng môi trường hiện tại)
+  zipformer:
+    model_id: hynt/Zipformer-30M-RNNT-6000h # Định danh model Zipformer ASR tiếng Việt
+    local_dir: ${env.paths.base_models}/Zipformer-30M-RNNT-6000h # Thư mục chứa weights ONNX của Zipformer
+    encoder: encoder-epoch-20-avg-10.onnx # File ONNX encoder
+    decoder: decoder-epoch-20-avg-10.onnx # File ONNX decoder
+    joiner: joiner-epoch-20-avg-10.onnx   # File ONNX joiner
+    bpe_model: bpe.model        # File từ điển BPE tokenizer
+    decoding_method: greedy_search # Phương pháp giải mã: "greedy_search" hoặc "modified_beam_search"
+    max_active_paths: 4         # Số đường đi tối đa khi dùng modified_beam_search
+  aligner:
+    model_id: nguyenvulebinh/wav2vec2-base-vi-vlsp2020 # Model wav2vec2 căn chỉnh mốc thời gian từ (word timestamps)
+    local_dir: ${env.paths.base_models}/wav2vec2-base-vi-vlsp2020 # Thư mục local chứa model aligner
+  regions:
+    merge_gap_seconds: 0.5      # Khoảng cách tối đa (giây) giữa các từ để gộp thành một speech region
+    pad_seconds: 0.25           # Padding mở rộng biên hai đầu của speech region (giây)
+  channel_matching:
+    min_score: 0.4              # Điểm cosine tương đồng tối thiểu để khớp kênh stereo với speaker turns gốc
+    min_margin: 0.05            # Độ chênh lệch điểm tối thiểu giữa kênh tốt nhất và kênh đối thủ để tránh nhầm lẫn
+
+
+
+# ------------------------------------------------------------------------------
+# 10. ĐÁNH GIÁ CHẤT LƯỢNG STEREO & BÁO CÁO DỮ LIỆU (BENCHMARK & RETENTION)
+# ------------------------------------------------------------------------------
+benchmark:
+  check_models: true           # Kiểm tra sự tồn tại của các model checkpoint benchmark trước khi chạy
+  device: auto                 # Thiết bị chạy benchmark: "auto", "cuda", "cpu"
+  dnsmos_dir: ${env.paths.dnsmos} # Thư mục chứa checkpoint DNSMOS đánh giá chất lượng âm thanh
+  output_dir: outputs/benchmark/${pipeline.name}_${data.source} # Thư mục lưu kết quả benchmark chi tiết
+  retention_report_md: outputs/data_retention_report.md # File Markdown tổng kết tỷ lệ giữ lại dữ liệu qua các bước
+  debug: false                 # Chế độ debug benchmark (ghi log chi tiết hơn)
+  workers: 2                   # Số luồng CPU đánh giá song song các file stereo
+
+# ------------------------------------------------------------------------------
+# 11. BẢN ĐỒ CHỦ ĐỀ VĂN BẢN (TRANSCRIPT TOPIC MAP)
+# ------------------------------------------------------------------------------
+topic_map:
+  input_dir: transcripts       # Thư mục chứa các file .txt transcript sau khi chạy ASR
+  model_dir: ${oc.select:env.paths.vietnamese_bi_encoder,${oc.select:env.paths.base_models,${oc.env:MODEL_ROOT,models}}/vietnamese-bi-encoder} # Model embedding ngữ nghĩa tiếng Việt
+  output_dir: ${data.base_output_dir}/topic-map # Thư mục xuất biểu đồ phân cụm t-SNE chủ đề hội thoại
+  device: ${runtime.device}    # Thiết bị chạy trích xuất embedding chủ đề (cuda/cpu)
+

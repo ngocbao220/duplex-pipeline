@@ -35,7 +35,17 @@ def pipeline_config(name, args, cfg):
     if name == 'sommelier':
         import yaml
 
-        config = yaml.safe_load((ROOT / 'configs/pipeline/sommelier.yaml').read_text())
+        config_path = getattr(args, 'config', None)
+        if config_path and Path(config_path).is_file():
+            config = yaml.safe_load(Path(config_path).read_text(encoding='utf-8'))
+        elif (ROOT / 'configs/pipeline/sommelier.yaml').exists():
+            config = yaml.safe_load((ROOT / 'configs/pipeline/sommelier.yaml').read_text(encoding='utf-8'))
+        else:
+            config = {}
+        for key in ('overlap_threshold', 'speaker_link_threshold', 'max_chunk_duration', 'demucs', 'expected_speakers'):
+            val = getattr(args, key, None)
+            if val is not None:
+                config[key] = val
     else:
         config = json.loads(args.duplexchat_config.read_text())
     config['debug'] = bool(args.debug)

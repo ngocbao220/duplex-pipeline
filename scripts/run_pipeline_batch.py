@@ -229,6 +229,7 @@ def _publish_sommelier_stereo(run_output: Path, collection_output: Path, dialogu
 def _run_sommelier_item(
     dialogue: Path, input_root: Path, output_root: Path, manifest_path: Path,
     run_output: Path, env: dict[str, str], index: int, total: int,
+    extra_cmd_args: list[str] | None = None,
 ) -> dict:
     key = dialogue.relative_to(input_root).as_posix()
     stereo = _stereo_output_path(dialogue, input_root, output_root)
@@ -242,6 +243,8 @@ def _run_sommelier_item(
         sys.executable, "-m", "sommelier", "single",
         "--input", str(dialogue), "--output-dir", str(run_output),
     ]
+    if extra_cmd_args:
+        command.extend(extra_cmd_args)
     try:
         timing = _timed_subprocess(command, dialogue, run_output, env)
         if timing["exit_code"] == 0:
@@ -829,6 +832,22 @@ def run_batch():
                         help="Verified local DialogueSidon model directory passed to every separation process.")
     parser.add_argument("--workers", "-w", type=int, default=2,
                         help="Number of parallel worker processes to saturate GPU (default: 2 for A100 40GB).")
+    parser.add_argument("--threads-per-worker", type=int, default=1,
+                        help="Number of CPU threads allocated per worker process (default: 1).")
+    parser.add_argument("--music-model", type=str, default="htdemucs",
+                        help="Demucs music separation model (default: htdemucs).")
+    parser.add_argument("--speaker-link-threshold", type=float, default=None,
+                        help="Cosine similarity threshold for linking speaker embeddings across chunks.")
+    parser.add_argument("--expected-speakers", type=int, default=2,
+                        help="Expected number of speakers in dialogue.")
+    parser.add_argument("--num-steps", type=int, default=30,
+                        help="Number of diffusion steps for DialogueSidon separation (default: 30).")
+    parser.add_argument("--overlap-threshold", type=float, default=None,
+                        help="Sommelier overlap detection threshold.")
+    parser.add_argument("--max-chunk-duration", type=float, default=None,
+                        help="Sommelier max chunk duration.")
+    parser.add_argument("--cholimex-config", type=Path, default=None,
+                        help="Path to Cholimex config JSON or YAML.")
     parser.add_argument("--resource-mode", choices=("auto", "manual"), default="auto",
                         help="Auto-calibrate workers from observed VRAM, or use --workers unchanged.")
     parser.add_argument("--gpu-memory-reserve-ratio", type=float, default=0.10,
@@ -918,11 +937,12 @@ def run_batch():
         parser.error("--max-workers-per-gpu must be positive")
 
     # Limit CPU thread pinning to avoid 100% CPU spikes across massive cores
-    env["OMP_NUM_THREADS"] = "1"
-    env["MKL_NUM_THREADS"] = "1"
-    env["OPENBLAS_NUM_THREADS"] = "1"
-    env["VECLIB_MAXIMUM_THREADS"] = "1"
-    env["NUMEXPR_NUM_THREADS"] = "1"
+    thread_str = str(max(1, args.threads_per_worker))
+    env["OMP_NUM_THREADS"] = thread_str
+    env["MKL_NUM_THREADS"] = thread_str
+    env["OPENBLAS_NUM_THREADS"] = thread_str
+    env["VECLIB_MAXIMUM_THREADS"] = thread_str
+    env["NUMEXPR_NUM_THREADS"] = thread_str
     # Ensure PYTHONPATH contains project root and package sources for child subprocesses
     duplex_src = str(ROOT_DIR / "pipeline" / "duplexchat" / "src")
     cholimex_src = str(ROOT_DIR / "pipeline" / "cholimex" / "src")
@@ -1089,6 +1109,12 @@ def run_batch():
                     *dev_args,
                     filter_flag
                 ]
+                if args.filter_music and args.music_model:
+                    cmd.extend(["--music-model", args.music_model])
+                if args.speaker_link_threshold is not None:
+                    cmd.extend(["--speaker-link-threshold", str(args.speaker_link_threshold)])
+                if args.expected_speakers is not None:
+                    cmd.extend(["--expected-speakers", str(args.expected_speakers)])
                 if args.debug:
                     cmd.append("--debug")
                 if args.lid:
@@ -1123,6 +1149,12 @@ def run_batch():
 
                 filter_flag = "--filter-music" if args.filter_music else "--no-filter-music"
                 cmd = [sys.executable, "-m", "duplexchat", "split_valid_dialogue", "--input", str(wav), "--output-dir", str(sub_out), *dev_args, filter_flag]
+                if args.filter_music and args.music_model:
+                    cmd.extend(["--music-model", args.music_model])
+                if args.speaker_link_threshold is not None:
+                    cmd.extend(["--speaker-link-threshold", str(args.speaker_link_threshold)])
+                if args.expected_speakers is not None:
+                    cmd.extend(["--expected-speakers", str(args.expected_speakers)])
                 if args.debug:
                     cmd.append("--debug")
                 if args.lid:
@@ -1208,7 +1240,8 @@ def run_batch():
                     "--input", str(sdir),
                     "--output-dir", str(sub_out),
                     *dev_args,
-                    "--separation-chunk", str(args.separation_chunk)
+                    "--separation-chunk", str(args.separation_chunk),
+                    "--num-steps", str(args.num_steps),
                 ]
                 if args.separation_model:
                     cmd.extend(["--separation-model", str(args.separation_model.resolve())])
@@ -1247,7 +1280,14 @@ def run_batch():
                     dev_args = ["--device-ids", "cpu"]
                     gpu_tag = "[CPU] "
 
-                cmd = [sys.executable, "-m", "duplexchat", "separate_dialogue", "--input", str(sdir), "--output-dir", str(sub_out), *dev_args, "--separation-chunk", str(args.separation_chunk)]
+                cmd = [
+                    sys.executable, "-m", "duplexchat", "separate_dialogue",
+                    "--input", str(sdir),
+                    "--output-dir", str(sub_out),
+                    *dev_args,
+                    "--separation-chunk", str(args.separation_chunk),
+                    "--num-steps", str(args.num_steps),
+                ]
                 cmd.extend(["--progress-manifest", str(manifest_path)])
                 if args.separation_model:
                     cmd.extend(["--separation-model", str(args.separation_model.resolve())])
@@ -1311,6 +1351,18 @@ def run_batch():
                 input_dir, output_dir, "sommelier", sommelier_sources,
             )
 
+        sommelier_extra = []
+        if args.speaker_link_threshold is not None:
+            sommelier_extra.extend(["--speaker-link-threshold", str(args.speaker_link_threshold)])
+        if args.overlap_threshold is not None:
+            sommelier_extra.extend(["--overlap-threshold", str(args.overlap_threshold)])
+        if args.max_chunk_duration is not None:
+            sommelier_extra.extend(["--max-chunk-duration", str(args.max_chunk_duration)])
+        if args.expected_speakers is not None:
+            sommelier_extra.extend(["--expected-speakers", str(args.expected_speakers)])
+        if args.debug:
+            sommelier_extra.append("--debug")
+
         if subdirs:
             print(f"=== Running Sommelier on {len(subdirs)} dialogue folders from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
             if args.dry_run:
@@ -1330,7 +1382,8 @@ def run_batch():
                         cmd = [
                             sys.executable, "-m", "sommelier", "single",
                             "--input", str(dwav),
-                            "--output-dir", str(run_out)
+                            "--output-dir", str(run_out),
+                            *sommelier_extra,
                         ]
                         print(f"  [{d_idx}/{len(dialogue_files)}] {dwav.name} -> {sub_out.name}")
                         print("    Command:", " ".join(cmd))
@@ -1362,6 +1415,7 @@ def run_batch():
                             timing = _run_sommelier_item(
                                 dwav, input_dir, output_dir, sommelier_manifest,
                                 run_out, worker_env, d_idx, len(dialogue_files),
+                                extra_cmd_args=sommelier_extra,
                             )
                             sub_timings.append(timing)
                         return sub_timings
@@ -1385,7 +1439,8 @@ def run_batch():
                     cmd = [
                         sys.executable, "-m", "sommelier", "single",
                         "--input", str(wav),
-                        "--output-dir", str(sub_out)
+                        "--output-dir", str(sub_out),
+                        *sommelier_extra,
                     ]
                     print(f"[{idx}/{len(dialogue_files)}] {wav.name} -> {sub_out.name}")
                     print("  Command:", " ".join(cmd))
@@ -1397,6 +1452,7 @@ def run_batch():
                     return _run_sommelier_item(
                         wav, input_dir, output_dir, sommelier_manifest,
                         sub_out, env, idx, len(dialogue_files),
+                        extra_cmd_args=sommelier_extra,
                     )
 
                 with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
@@ -1426,6 +1482,10 @@ def run_batch():
             print(f"No DuplexChat stereo files with matching dialogue mixtures found in {input_dir}")
             return
 
+        cholimex_extra = []
+        if args.cholimex_config:
+            cholimex_extra.extend(["--config", str(args.cholimex_config.resolve())])
+
         print(f"=== Running Cholimex refinement on {len(pairs)} DuplexChat clips from {input_dir} (GPU {gpu_label}, workers={total_workers}) ===")
         if args.dry_run:
             for idx, (stereo, mixture, output, _conversation_idx) in enumerate(pairs, start=1):
@@ -1433,6 +1493,7 @@ def run_batch():
                 print("  Command:", " ".join([
                     sys.executable, "-m", "cholimex", "collection", "--input", str(stereo),
                     "--mixture", str(mixture), "--output-dir", str(output),
+                    *cholimex_extra,
                 ]))
         else:
             gpu_queue = _create_gpu_queue()
@@ -1460,6 +1521,7 @@ def run_batch():
                     cmd = [
                         sys.executable, "-m", "cholimex", "collection", "--input", str(stereo),
                         "--mixture", str(mixture), "--output-dir", str(output),
+                        *cholimex_extra,
                     ]
                     print(f"[{idx}/{len(pairs)}] {gpu_tag}{stereo.name} + {mixture.name} -> {output}")
                     timing = _timed_subprocess(cmd, stereo, output, worker_env)

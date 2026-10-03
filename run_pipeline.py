@@ -113,16 +113,26 @@ def _run_cmd(cmd: list[str], env: dict[str, str], dry_run: bool = False) -> int:
     return res.returncode
 
 
-def _batch_runtime_environment(env: dict[str, str]) -> dict[str, str]:
+def _batch_runtime_environment(env: dict[str, str], cfg: DictConfig | None = None) -> dict[str, str]:
     """Let the batch scheduler select physical GPUs from its explicit --gpu value."""
     batch_env = dict(env)
     batch_env.pop("CUDA_VISIBLE_DEVICES", None)
+    threads = "1"
+    if cfg is not None:
+        threads = str(cfg.get("optimization", {}).get("threads_per_worker", 1))
+    batch_env["OMP_NUM_THREADS"] = threads
+    batch_env["MKL_NUM_THREADS"] = threads
+    batch_env["OPENBLAS_NUM_THREADS"] = threads
+    batch_env["VECLIB_MAXIMUM_THREADS"] = threads
+    batch_env["NUMEXPR_NUM_THREADS"] = threads
     return batch_env
 
 
 def _append_resource_tuning_args(cmd: list[str], cfg: DictConfig) -> None:
     optimization = cfg.get("optimization", {})
+    threads = optimization.get("threads_per_worker", 1)
     cmd.extend([
+        "--threads-per-worker", str(threads),
         "--resource-mode", str(optimization.get("resource_mode", "auto")),
         "--gpu-memory-reserve-ratio", str(optimization.get("gpu_memory_reserve_ratio", 0.10)),
         "--max-workers-per-gpu", str(optimization.get("max_workers_per_gpu", 8)),
@@ -199,6 +209,13 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         if max_chunk is not None:
             cmd.extend(["--diarize-chunk", str(max_chunk)])
 
+    speaker_link_threshold = diar_cfg.get("speaker_link_threshold") or global_diar.get("speaker_link_threshold")
+    if speaker_link_threshold is not None:
+        cmd.extend(["--speaker-link-threshold", str(speaker_link_threshold)])
+    expected_speakers = diar_cfg.get("expected_speakers") or global_diar.get("expected_speakers")
+    if expected_speakers is not None:
+        cmd.extend(["--expected-speakers", str(expected_speakers)])
+
     dialogue_cfg = split_cfg.get("dialogue", {})
     for config_key, flag, default in (
         ("gap_seconds", "--dialogue-gap-seconds", 5.0),
@@ -211,9 +228,12 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
         cmd.extend([flag, str(dialogue_cfg.get(config_key, default))])
 
     # Music filtering
-    music_filter_enabled = split_cfg.get("music_filter", {}).get("enabled", True)
+    music_filter_cfg = split_cfg.get("music_filter", {})
+    music_filter_enabled = music_filter_cfg.get("enabled", True)
     if music_filter_enabled:
         cmd.append("--filter-music")
+        if music_filter_cfg.get("model"):
+            cmd.extend(["--music-model", str(music_filter_cfg.model)])
     else:
         cmd.append("--no-filter-music")
 
@@ -229,7 +249,7 @@ def step_split_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     if cfg.dry_run:
         cmd.append("--dry-run")
 
-    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env, cfg), dry_run=cfg.dry_run)
 
 
 def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
@@ -257,6 +277,13 @@ def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     ]
     _append_resource_tuning_args(cmd, cfg)
 
+    num_steps = (
+        cfg.pipeline.get("separation", {}).get("num_steps")
+        or cfg.get("separation", {}).get("num_steps")
+        or 30
+    )
+    cmd.extend(["--num-steps", str(num_steps)])
+
     sep_model = cfg.pipeline.get("separation", {}).get("model")
     if sep_model:
         model_path = Path(sep_model)
@@ -266,7 +293,7 @@ def step_separate_dialogue(cfg: DictConfig, env: dict[str, str]) -> int:
     if cfg.dry_run:
         cmd.append("--dry-run")
 
-    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env, cfg), dry_run=cfg.dry_run)
 
 
 def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
@@ -297,15 +324,30 @@ def step_sommelier(cfg: DictConfig, env: dict[str, str]) -> int:
     ]
     _append_resource_tuning_args(cmd, cfg)
 
+    sommelier_cfg = cfg.get("pipeline", {})
+    if sommelier_cfg.get("overlap_threshold") is not None:
+        cmd.extend(["--overlap-threshold", str(sommelier_cfg.overlap_threshold)])
+    if sommelier_cfg.get("speaker_link_threshold") is not None:
+        cmd.extend(["--speaker-link-threshold", str(sommelier_cfg.speaker_link_threshold)])
+    elif cfg.get("diarization", {}).get("speaker_link_threshold") is not None:
+        cmd.extend(["--speaker-link-threshold", str(cfg.diarization.speaker_link_threshold)])
+    if sommelier_cfg.get("max_chunk_duration") is not None:
+        cmd.extend(["--max-chunk-duration", str(sommelier_cfg.max_chunk_duration)])
+    if sommelier_cfg.get("expected_speakers") is not None:
+        cmd.extend(["--expected-speakers", str(sommelier_cfg.expected_speakers)])
+
     if cfg.dry_run:
         cmd.append("--dry-run")
 
-    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env, cfg), dry_run=cfg.dry_run)
 
 
 def step_asr(cfg: DictConfig, env: dict[str, str]) -> int:
     """Transcribe numbered stereo files only after final track reconstruction."""
     pipeline_name = str(cfg.pipeline.name).lower()
+    if pipeline_name == "cholimex":
+        logger.info("Cholimex pipeline finishes after refinement; skipping ASR transcription.")
+        return 0
     if pipeline_name not in {"duplexchat", "sommelier"}:
         logger.error("ASR supports pipeline=duplexchat or pipeline=sommelier; got %s", pipeline_name)
         return 1
@@ -348,9 +390,21 @@ def step_cholimex(cfg: DictConfig, env: dict[str, str]) -> int:
         "--workers", str(workers),
     ]
     _append_resource_tuning_args(cmd, cfg)
+
+    pipeline_cfg = cfg.get("pipeline", {})
+    if str(pipeline_cfg.get("name", "")).lower() == "cholimex":
+        resolved_cholimex = OmegaConf.to_container(pipeline_cfg, resolve=True)
+        if not cfg.dry_run:
+            cholimex_out_dir.mkdir(parents=True, exist_ok=True)
+            cholimex_cfg_path = cholimex_out_dir / "cholimex_config.json"
+            cholimex_cfg_path.write_text(json.dumps(resolved_cholimex, indent=2), encoding="utf-8")
+            cmd.extend(["--cholimex-config", str(cholimex_cfg_path.resolve())])
+        else:
+            cmd.extend(["--cholimex-config", str((cholimex_out_dir / "cholimex_config.json").resolve())])
+
     if cfg.dry_run:
         cmd.append("--dry-run")
-    return _run_cmd(cmd, _batch_runtime_environment(env), dry_run=cfg.dry_run)
+    return _run_cmd(cmd, _batch_runtime_environment(env, cfg), dry_run=cfg.dry_run)
 
 
 def step_separate_stereo(cfg: DictConfig, env: dict[str, str]) -> int:

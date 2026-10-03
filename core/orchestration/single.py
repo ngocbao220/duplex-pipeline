@@ -15,7 +15,8 @@ def run_single(name: str, source: Path, output: Path, debug: bool, separate_chun
                filter_music: bool = False, music_model: str = "htdemucs",
                diarization_backend: str | None = None,
                diarization_model: str | None = None,
-               separation_model: str | None = None) -> int:
+               separation_model: str | None = None,
+               **extra_args) -> int:
     """Run one adapter without reference audio."""
     cfg = None
     if name == "cholimex":
@@ -26,7 +27,8 @@ def run_single(name: str, source: Path, output: Path, debug: bool, separate_chun
                            filter_music=filter_music, music_model=music_model,
                            diarization_backend=diarization_backend, diarization_model=diarization_model,
                            separation_model=separation_model,
-                           duplexchat_config=ROOT / "configs/duplexchat.json", sample_rate=16000)
+                           duplexchat_config=ROOT / "configs/duplexchat.json", sample_rate=16000,
+                           **extra_args)
     run_dir = output.parent / ".runs" / uuid.uuid4().hex
     result_path = run_dir / "results.json"
     request = {"pipeline": name, "config": pipeline_config(name, args, cfg),

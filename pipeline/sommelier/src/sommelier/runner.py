@@ -183,12 +183,13 @@ def run(source: Path, output: Path, config: dict):
     with tempfile.TemporaryDirectory(prefix="sommelier-config-") as temporary:
         config_path = Path(temporary) / "config.json"
         config_path.write_text(json.dumps(cfg), encoding="utf-8")
+        demucs_flag = "--demucs" if config.get("demucs", False) else "--no-demucs"
         command = [
             sys.executable, str(vendor / "main_original_ASR_MoE.py"),
             "--input_folder_path", str(input_dir),
             "--config_path", str(config_path),
             "--sepreformer",
-            "--no-demucs",
+            demucs_flag,
             "--no-ASRMoE",
             "--no-qwen3omni",
             "--until-pre-asr",
@@ -198,6 +199,9 @@ def run(source: Path, output: Path, config: dict):
             "--speaker-link-threshold", str(config.get("speaker_link_threshold", 0.75)),
             "--max-chunk-duration", str(config.get("max_chunk_duration", 300.0)),
         ]
+        if config.get("expected_speakers") is not None:
+            idx = command.index("--expected-speakers")
+            command[idx + 1] = str(config["expected_speakers"])
         if split_turns is not None:
             turns_path = Path(temporary) / "split_diarization.json"
             turns_path.write_text(json.dumps({"segments": split_turns}), encoding="utf-8")

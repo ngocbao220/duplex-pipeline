@@ -17,11 +17,20 @@ def build_pipeline_parser(name: str) -> argparse.ArgumentParser:
         collection.add_argument("--input", type=Path, required=True, help="Numbered DuplexChat stereo WAV")
         collection.add_argument("--mixture", type=Path, required=True, help="Original mono mixture WAV")
         collection.add_argument("--output-dir", type=Path, required=True)
+        collection.add_argument("--config", type=Path, default=None, help="Path to Cholimex config JSON or YAML")
 
     single = commands.add_parser("single", help="Run one supplied mixture audio file.")
     single.add_argument("--input", type=Path, required=True)
     single.add_argument("--output-dir", type=Path, required=True)
     single.add_argument("--debug", action="store_true")
+    if name == "sommelier":
+        single.add_argument("--config", type=Path, default=None, help="Sommelier config YAML or JSON")
+        single.add_argument("--overlap-threshold", type=float, default=None)
+        single.add_argument("--speaker-link-threshold", type=float, default=None)
+        single.add_argument("--max-chunk-duration", type=float, default=None)
+        single.add_argument("--demucs", action="store_true", default=None)
+        single.add_argument("--expected-speakers", type=int, default=None)
+
     if name == "duplexchat":
         single.add_argument("--separation-chunk", "--separate-chunk", dest="separate_chunk", type=float, default=120.0)
         single.add_argument("--separation-model", type=Path, default=None, help="Verified local DialogueSidon model directory")
@@ -51,6 +60,8 @@ def build_pipeline_parser(name: str) -> argparse.ArgumentParser:
         split.add_argument("--max-single-speaker-ratio", type=float, default=0.8)
         split.add_argument("--preferred-split-pause-seconds", type=float, default=3.0)
         split.add_argument("--min-split-pause-seconds", type=float, default=1.5)
+        split.add_argument("--speaker-link-threshold", type=float, default=0.75, help="Cosine similarity threshold for linking speaker embeddings across chunks")
+        split.add_argument("--expected-speakers", type=int, default=2, help="Expected number of speakers in the conversation")
 
         sep = commands.add_parser("separate_dialogue", help="Run DialogueSidon separation on extracted dialogue files.")
         sep.add_argument("--input", type=Path, required=True)
@@ -81,9 +92,20 @@ def run_pipeline_command(name: str, argv: list[str] | None = None) -> int:
         from core.config import load_config
         from cholimex.collection import refine_stereo_file
 
+        config_path = getattr(args, "config", None)
+        if config_path is None:
+            if (ROOT / "configs/config.json").exists():
+                config_path = ROOT / "configs/config.json"
+            elif (ROOT / "configs/pipeline/cholimex.yaml").exists():
+                config_path = ROOT / "configs/pipeline/cholimex.yaml"
+
+        cholimex_cfg = load_config(config_path) if config_path else load_config()
+
         output_dir = args.output_dir.resolve()
         stereo = refine_stereo_file(
-            args.input.resolve(), output_dir, load_config(ROOT / "configs/config.json"),
+            args.input.resolve(),
+            output_dir,
+            cholimex_cfg,
             mixture_path=args.mixture.resolve(),
         )
         print(f"Done\n-> VAD: {output_dir / 'vad_left.txt'}, {output_dir / 'vad_right.txt'}\n-> stereo: {stereo}", flush=True)
@@ -115,6 +137,8 @@ def run_pipeline_command(name: str, argv: list[str] | None = None) -> int:
             max_single_speaker_ratio=args.max_single_speaker_ratio,
             preferred_split_pause_seconds=args.preferred_split_pause_seconds,
             min_split_pause_seconds=args.min_split_pause_seconds,
+            speaker_link_threshold=getattr(args, "speaker_link_threshold", 0.75),
+            expected_speakers=getattr(args, "expected_speakers", 2),
         )
         print(f"Done split_valid_dialogue\n-> Output: {args.output_dir}\n-> Dialogue count: {result['dialogue_count']}", flush=True)
         return 0
@@ -146,10 +170,15 @@ def run_pipeline_command(name: str, argv: list[str] | None = None) -> int:
         if not args.input.is_file():
             raise SystemExit(f"Input audio file does not exist: {args.input}")
         from .single import run_single
+        extra = {}
+        for k in ("config", "overlap_threshold", "speaker_link_threshold", "max_chunk_duration", "demucs", "expected_speakers"):
+            if hasattr(args, k):
+                extra[k] = getattr(args, k)
         return run_single(name, args.input.resolve(), args.output_dir.resolve(), args.debug,
                            getattr(args, "separate_chunk", 120.0), getattr(args, "device_ids", None),
                            getattr(args, "filter_music", False), getattr(args, "music_model", "htdemucs"),
                            getattr(args, "diarization_backend", None), getattr(args, "diarization_model", None),
-                           str(args.separation_model.resolve()) if getattr(args, "separation_model", None) else None)
+                           str(args.separation_model.resolve()) if getattr(args, "separation_model", None) else None,
+                           **extra)
 
     raise AssertionError(f"Unsupported command: {args.command}")

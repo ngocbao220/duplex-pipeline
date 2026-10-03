@@ -207,6 +207,8 @@ def run_single_audio(
     filter_music: bool = False,
     music_model: str = "htdemucs",
     debug: bool = False,
+    speaker_link_threshold: float = 0.75,
+    expected_speakers: int = 2,
 ) -> dict:
     audio_path = Path(audio_path_str)
     if not audio_path.is_file():
@@ -242,7 +244,17 @@ def run_single_audio(
 
     logger.info("Device: diarization=%s | separation=%s", _device_label(devices[0]), [_device_label(d) for d in devices])
     with StepTimer(logger, "2. Split Dialogue", duration_sec=audio_duration_sec) as timer:
-        diarizer, segments = diarize(normalized, phase_dir, diarization_model, diarization_backend, devices[0], diarize_chunk, _no_progress)
+        diarizer, segments = diarize(
+            normalized,
+            phase_dir,
+            diarization_model,
+            diarization_backend,
+            devices[0],
+            diarize_chunk,
+            _no_progress,
+            speaker_link_threshold=speaker_link_threshold,
+            expected_speakers=expected_speakers,
+        )
     phase_times["diarization"] = timer.elapsed
     _release(diarizer)
     if debug:
@@ -310,6 +322,8 @@ def split_valid_dialogues(
     max_single_speaker_ratio: float = 0.8,
     preferred_split_pause_seconds: float = 3.0,
     min_split_pause_seconds: float = 1.5,
+    speaker_link_threshold: float = 0.75,
+    expected_speakers: int = 2,
 ) -> dict:
     """Preprocesses audio, diarizes, extracts valid 2-speaker dialogues, applies music filtering, runs Whisper LID for Vietnamese filtering, and saves dialogue WAVs."""
     import json
@@ -352,7 +366,17 @@ def split_valid_dialogues(
             pass
 
     with StepTimer(logger, "2. Split Dialogue", duration_sec=audio_duration_sec) as timer:
-        diarizer, segments = diarize(normalized, phase_dir, diarization_model, diarization_backend, devices[0], diarize_chunk, _no_progress)
+        diarizer, segments = diarize(
+            normalized,
+            phase_dir,
+            diarization_model,
+            diarization_backend,
+            devices[0],
+            diarize_chunk,
+            _no_progress,
+            speaker_link_threshold=speaker_link_threshold,
+            expected_speakers=expected_speakers,
+        )
     phase_times["diarization"] = timer.elapsed
     _release(diarizer)
 

@@ -332,7 +332,7 @@ def test_hydra_config_declares_cholimex_as_a_refinement_output():
     with open(root / "configs" / "pipeline" / "cholimex.yaml", encoding="utf-8") as f:
         cholimex = yaml.safe_load(f)
 
-    assert config["data"]["cholimex_out_dir"] == "${env.paths.base_output}/cholimex/${data.source}"
+    assert config["data"]["cholimex_out_dir"] == "${data.base_output_dir}/cholimex/${data.source}"
     assert cholimex["name"] == "cholimex"
 
 
@@ -344,8 +344,8 @@ def test_topic_map_model_path_uses_environment_local_model_root():
     config = yaml.safe_load((root / "configs" / "config.yaml").read_text(encoding="utf-8"))
     assert config["topic_map"] == {
         "input_dir": "transcripts",
-        "model_dir": "${env.paths.vietnamese_bi_encoder}",
-        "output_dir": "${env.paths.base_output}/topic-map",
+        "model_dir": "${oc.select:env.paths.vietnamese_bi_encoder,${oc.select:env.paths.base_models,${oc.env:MODEL_ROOT,models}}/vietnamese-bi-encoder}",
+        "output_dir": "${data.base_output_dir}/topic-map",
         "device": "${runtime.device}",
     }
     for env_name in ("sever", "dev"):

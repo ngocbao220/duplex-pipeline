@@ -114,8 +114,9 @@ def resolve_local_model_path(
             configured_path = str(Path(base_dir) / default_subpath)
         if not configured_path:
             configured_path = default_subpath or str(model_identifier or "")
+        env_hint = f" ({env_var})" if env_var else ""
         raise FileNotFoundError(
-            f"No found model {model_identifier or default_subpath} on path: {configured_path}. "
+            f"No found model {model_identifier or default_subpath}{env_hint} on path: {configured_path}. "
             "Hub and Torch Hub fallback are disabled in offline mode."
         )
 

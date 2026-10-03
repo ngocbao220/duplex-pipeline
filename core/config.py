@@ -32,25 +32,43 @@ class Config:
 
 FIELD_ALIASES = {
     "runtime.device": "runtime_device",
+    "runtime_device": "runtime_device",
+    "device": "runtime_device",
     "runtime.allow_cpu_fallback": "allow_cpu_fallback",
+    "allow_cpu_fallback": "allow_cpu_fallback",
     "separation.num_steps": "separation_num_steps",
+    "pipeline.separation.num_steps": "separation_num_steps",
+    "separation_num_steps": "separation_num_steps",
+    "num_steps": "separation_num_steps",
     "benchmark.output_dir": "benchmark_output_dir",
-    "cholimex.backchannel_max_duration": "cholimex_backchannel_max_duration",
-    "cholimex.min_vad_duration": "cholimex_min_vad_duration",
-    "cholimex.vad_onset": "cholimex_vad_onset",
-    "cholimex.vad_offset": "cholimex_vad_offset",
-    "cholimex.vad_padding_ms": "cholimex_vad_padding_ms",
-    "cholimex.merge_gap": "cholimex_merge_gap",
-    "cholimex.min_reference_duration": "cholimex_min_reference_duration",
-    "cholimex.speaker_assignment_mode": "cholimex_speaker_assignment_mode",
-    "cholimex.cosine_similarity_threshold": "cholimex_cosine_similarity_threshold",
-    "cholimex.overlap_padding": "cholimex_overlap_padding",
-    "cholimex.proposal_backend": "cholimex_proposal_backend",
-    "cholimex.proposal_model": "cholimex_proposal_model",
-    "cholimex.overlap_separator_backend": "cholimex_overlap_separator_backend",
-    "cholimex.overlap_separator_model": "cholimex_overlap_separator_model",
-    "cholimex.speaker_embedding_model": "cholimex_speaker_embedding_model",
+    "benchmark_output_dir": "benchmark_output_dir",
 }
+
+CHOLIMEX_KEYS = [
+    "backchannel_max_duration",
+    "min_vad_duration",
+    "vad_onset",
+    "vad_offset",
+    "vad_padding_ms",
+    "merge_gap",
+    "min_reference_duration",
+    "speaker_assignment_mode",
+    "cosine_similarity_threshold",
+    "overlap_padding",
+    "proposal_backend",
+    "proposal_model",
+    "overlap_separator_backend",
+    "overlap_separator_model",
+    "speaker_embedding_model",
+]
+
+for _k in CHOLIMEX_KEYS:
+    FIELD_ALIASES[_k] = f"cholimex_{_k}"
+    FIELD_ALIASES[f"cholimex.{_k}"] = f"cholimex_{_k}"
+    FIELD_ALIASES[f"pipeline.{_k}"] = f"cholimex_{_k}"
+    FIELD_ALIASES[f"cholimex_{_k}"] = f"cholimex_{_k}"
+
+IGNORED_KEYS = {"name", "pipeline.name", "_target_"}
 PATH_FIELDS = {"benchmark_output_dir"}
 
 
@@ -69,6 +87,8 @@ def apply_config_data(cfg: Config, data: dict[str, Any]) -> Config:
     if not isinstance(data, dict):
         raise TypeError("config.json must contain a JSON object")
     for config_key, value in _flatten_mapping(data).items():
+        if config_key in IGNORED_KEYS:
+            continue
         field_name = FIELD_ALIASES.get(config_key)
         if field_name is None:
             raise ValueError(f"unknown config key: {config_key}")
@@ -78,10 +98,21 @@ def apply_config_data(cfg: Config, data: dict[str, Any]) -> Config:
 
 def load_config(path: Path | str = Path("configs/config.json")) -> Config:
     path_obj = Path(path)
+    if not path_obj.exists():
+        fallback_yaml = Path("configs/pipeline/cholimex.yaml")
+        if fallback_yaml.exists():
+            path_obj = fallback_yaml
+        else:
+            return Config()
+
     if path_obj.suffix in {".yaml", ".yml"}:
         try:
             from omegaconf import OmegaConf
-            raw_data = OmegaConf.to_container(OmegaConf.load(path_obj), resolve=True)
+            loaded = OmegaConf.load(path_obj)
+            try:
+                raw_data = OmegaConf.to_container(loaded, resolve=True)
+            except Exception:
+                raw_data = OmegaConf.to_container(loaded, resolve=False)
         except ImportError:
             import yaml
             with path_obj.open("r", encoding="utf-8") as handle:
