@@ -8,7 +8,9 @@ Log format theo logging.md:
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sys
 import time
 
@@ -80,6 +82,25 @@ def get_logger(name: str) -> logging.Logger:
     return logger
 
 
+def record_step_timing(step: str, elapsed: float, audio_seconds: float | None) -> None:
+    """Append one sub-step timing row to ``$PIPELINE_STEP_TIMINGS`` (JSONL) when it is set."""
+    path = os.environ.get("PIPELINE_STEP_TIMINGS")
+    if not path:
+        return
+    row = {
+        "run_id": os.environ.get("PIPELINE_RUN_ID"),
+        "phase": os.environ.get("PIPELINE_BENCH_PHASE"),
+        "step": step,
+        "elapsed_seconds": elapsed,
+        "audio_seconds": audio_seconds,
+    }
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+    except OSError:
+        pass
+
+
 class StepTimer:
     """Emit section header khi bắt đầu bước, emit Time + RTF khi kết thúc."""
 
@@ -112,6 +133,7 @@ class StepTimer:
             self.logger.info(
                 "Time: %.2fs | RTF: %.4f", elapsed, rtf
             )
+            record_step_timing(self.step, elapsed, self.duration_sec)
         else:
             self.logger.error("%s failed: %s: %s", self.step, exc_type.__name__, exc)
         return False

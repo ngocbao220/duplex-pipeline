@@ -38,7 +38,7 @@ from core.orchestration.contract import (
 from core.resource_tuning import GpuMemorySampler, choose_workers_per_gpu, cpu_worker_budget, probe_gpus
 from pipeline.duplexchat.src.duplexchat.model_options import DIARIZATION_MODELS, resolve_model_alias
 
-TIMING_REPORT_PATH = Path("outputs/pipeline_timing.json")
+TIMING_REPORT_PATH = Path(os.environ.get("PIPELINE_TIMING_REPORT", "outputs/pipeline_timing.json"))
 
 
 def _available_gpu_count() -> int:

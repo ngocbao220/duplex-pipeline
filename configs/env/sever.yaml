@@ -3,18 +3,18 @@ name: sever
 offline: true
 
 paths:
-  base_models: /storage-voice/voice/vdt/baottn/duplex-model-dir
-  base_data: /storage-voice/voice/vdt/baottn/duplex-data
+  base_models: /home/voice/data/voice/vdt/duplex-model-dir/duplex-model-dir
+  base_data: /home/voice/data/voice/vdt/vietnamese-duplex-data
   base_output: ${env.paths.base_data}/processed
   vietnamese_bi_encoder: ${env.paths.base_models}/vietnamese-bi-encoder
   dialoguesidon: ${env.paths.base_models}/DialogueSidon
   dnsmos: ${env.paths.base_models}/dnsmos
-  speechbrain: ${env.paths.base_models}/spker
+  speechbrain: ${env.paths.base_models}/spkrec-ecapa-voxceleb
   silero_vad: ${env.paths.base_models}/silero-vad
   nisqa: ${env.paths.base_models}/nisqa.tar
   squim: ${env.paths.base_models}/squim_objective_dns2020.pth
-  whisper: /raid/voice/chauhn3/whisper/whisper-large-v3
+  whisper: /home/voice/data/voice/models/whisper/whisper-large-v3-turbo
   sortformer: ${env.paths.base_models}/diar_streaming_sortformer_4spk-v2.1
-  nemotron: ${env.paths.base_models}/Nemotron-3-Diarization.nemo
-  sepreformer: ${env.paths.base_models}/epoch.0180.pth
+  nemotron: ${env.paths.base_models}/Nemotron-3-Diarization
+  sepreformer: ${env.paths.base_models}/sepreformer-base/epoch.0180.pth
   demucs: ${env.paths.base_models}/htdemucs

@@ -11,12 +11,13 @@ import os
 from pathlib import Path
 import re
 import shutil
+import time
 import wave
 
 import torch
 
 from core.orchestration.contract import progress_manifest_item, update_progress_manifest, validate_stereo
-from core.orchestration.logging_style import StepTimer, get_logger, section
+from core.orchestration.logging_style import StepTimer, get_logger, record_step_timing, section
 from core.outputs import (
     turns_from_diarization,
     write_json,
@@ -456,6 +457,8 @@ def split_valid_dialogues(
     candidate_dialogues = []
     output_dialogue_idx = 1
     lid_rejected_count = 0
+    music_seconds = 0.0
+    lid_seconds = 0.0
 
     for index, dialogue in enumerate(dialogues):
         start = max(0, min(waveform.shape[-1], round(dialogue.start * sample_rate)))
@@ -463,13 +466,17 @@ def split_valid_dialogues(
         crop = waveform[..., start:end].clone()
 
         if music_filter is not None:
+            started = time.perf_counter()
             crop = music_filter.filter_waveform(crop, sample_rate)
+            music_seconds += time.perf_counter() - started
             if music_filter_applied:
                 music_filtered_dialogue_count += 1
 
         vi_prob = 1.0
         if lid_filter is not None:
+            started = time.perf_counter()
             is_vi, vi_prob = lid_filter.is_vietnamese(crop, sample_rate, min_prob=min_vi_prob)
+            lid_seconds += time.perf_counter() - started
             if not is_vi:
                 lid_rejected_count += 1
                 candidate_dialogues.append({
@@ -544,6 +551,13 @@ def split_valid_dialogues(
             "filename": dialogue_filename,
         })
         output_dialogue_idx += 1
+
+    if music_filter is not None:
+        phase_times["music_filter"] = music_seconds
+        record_step_timing("3. Music Filter", music_seconds, audio_duration_sec)
+    if lid_filter is not None:
+        phase_times["lid"] = lid_seconds
+        record_step_timing("4. Language ID", lid_seconds, audio_duration_sec)
 
     skip_reason = None
     if not dialogue_info:

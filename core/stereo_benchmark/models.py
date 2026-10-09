@@ -337,7 +337,9 @@ def _load_local_speechbrain_encoder(encoder_classifier, local_target: Path, devi
     original_transfer_fetch = sb_parameter_transfer.fetch
     original_fetching_fetch = sb_fetching.fetch
 
-    def fetch_local(filename, _source, *fetch_args, **fetch_kwargs):
+    def fetch_local(filename, _source=None, *fetch_args, **fetch_kwargs):
+        fetch_kwargs.pop("source", None)
+        
         return original_fetching_fetch(
             filename, FetchSource(FetchFrom.LOCAL, str(local_root)), *fetch_args, **fetch_kwargs
         )
