@@ -18,6 +18,36 @@ def test_nisqa_one_returns_unavailable_when_package_missing_or_audio_empty():
     assert res_audio["status"] in ("ok", "unavailable")
 
 
+def test_nisqa_scores_long_audio_in_bounded_chunks(monkeypatch, tmp_path):
+    from pathlib import Path
+    import soundfile as sf
+    import core.stereo_benchmark.models as models
+
+    monkeypatch.setattr(models, "_ensure_nisqa_installed", lambda: True)
+    monkeypatch.setattr(models, "_nisqa_checkpoint_path", lambda: tmp_path / "nisqa.tar")
+
+    def predict(args, _device):
+        files = sorted(Path(args["data_dir"]).glob("*.wav"))
+        assert len(files) == 5
+        assert all(sf.info(path).duration <= 45 for path in files)
+
+        class Result:
+            def iterrows(self):
+                for index, path in enumerate(files):
+                    yield index, {"deg": path.name, "mos_pred": 2.0 if path.name.startswith("left") else 4.0}
+
+        return Result()
+
+    monkeypatch.setattr(models, "_predict_nisqa", predict)
+    result = models._nisqa_metrics(
+        np.zeros(61 * models.SAMPLE_RATE, dtype=np.float32),
+        np.zeros(125 * models.SAMPLE_RATE, dtype=np.float32),
+        "cpu",
+    )
+    assert result["left"]["nisqa_mos"] == 2.0
+    assert result["right"]["nisqa_mos"] == 4.0
+
+
 def test_acoustic_metrics_includes_nisqa_dict():
     left = np.random.randn(16000).astype(np.float32)
     right = np.random.randn(16000).astype(np.float32)

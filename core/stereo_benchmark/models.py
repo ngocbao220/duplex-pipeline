@@ -16,6 +16,7 @@ SQUIM_WINDOW_SAMPLES = SAMPLE_RATE * 10
 SQUIM_BATCH_SIZE = 8
 SPEAKER_WINDOW_SAMPLES = SAMPLE_RATE * 3
 SPEAKER_BATCH_SIZE = 16
+NISQA_CHUNK_SAMPLES = SAMPLE_RATE * 45
 _NISQA_MODEL_LOCK = Lock()
 _NISQA_MODELS: dict[tuple[str, str], object] = {}
 _MODEL_LOAD_LOCK = Lock()
@@ -70,17 +71,27 @@ def _nisqa_metrics(left: np.ndarray, right: np.ndarray, device: str) -> dict:
         checkpoint = _nisqa_checkpoint_path()
         with tempfile.TemporaryDirectory(prefix="nisqa-pair-") as directory:
             folder = Path(directory)
-            for name, audio in (("left.wav", left), ("right.wav", right)):
-                path = folder / name
-                sf.write(path, audio, SAMPLE_RATE)
-                sf.info(path)
+            chunk_lengths = {}
+            for channel, audio in (("left", left), ("right", right)):
+                count = max(1, int(np.ceil(len(audio) / NISQA_CHUNK_SAMPLES)))
+                for index, chunk in enumerate(np.array_split(audio, count)):
+                    name = f"{channel}_{index:03d}.wav" if count > 1 else f"{channel}.wav"
+                    path = folder / name
+                    sf.write(path, chunk, SAMPLE_RATE)
+                    sf.info(path)
+                    chunk_lengths[name] = len(chunk)
             args = _nisqa_prediction_args(checkpoint, folder / "left.wav", device)
             args.update(mode="predict_dir", data_dir=str(folder), tr_bs_val=2)
             result = _predict_nisqa(args, device)
             scores = {str(row["deg"]): float(row["mos_pred"]) for _, row in result.iterrows()}
+            def channel_score(channel: str) -> dict:
+                names = [name for name in chunk_lengths if name == f"{channel}.wav" or name.startswith(f"{channel}_")]
+                return {"status": "ok", "nisqa_mos": float(np.average(
+                    [scores[name] for name in names], weights=[chunk_lengths[name] for name in names]
+                ))}
             return _combine_channels(
-                {"status": "ok", "nisqa_mos": scores["left.wav"]},
-                {"status": "ok", "nisqa_mos": scores["right.wav"]},
+                channel_score("left"),
+                channel_score("right"),
             )
     except Exception as error:
         failure = unavailable(f"NISQA unavailable: {type(error).__name__}: {error}")
@@ -337,9 +348,7 @@ def _load_local_speechbrain_encoder(encoder_classifier, local_target: Path, devi
     original_transfer_fetch = sb_parameter_transfer.fetch
     original_fetching_fetch = sb_fetching.fetch
 
-    def fetch_local(filename, _source=None, *fetch_args, **fetch_kwargs):
-        fetch_kwargs.pop("source", None)
-        
+    def fetch_local(filename, source=None, *fetch_args, **fetch_kwargs):
         return original_fetching_fetch(
             filename, FetchSource(FetchFrom.LOCAL, str(local_root)), *fetch_args, **fetch_kwargs
         )
@@ -353,6 +362,7 @@ def _load_local_speechbrain_encoder(encoder_classifier, local_target: Path, devi
         return encoder_classifier.from_hparams(
             source=FetchSource(FetchFrom.LOCAL, str(local_root)),
             savedir=str(local_root),
+            overrides={"pretrained_path": str(local_root)},
             run_opts={"device": device},
         )
     finally:

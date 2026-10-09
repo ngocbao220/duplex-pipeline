@@ -252,12 +252,21 @@ def _denormalize(latents: torch.Tensor, models: dict) -> torch.Tensor:
     return (latents.float() * models["latent_norm_std"] + models["latent_norm_mean"]).to(latents.dtype)
 
 
+def _envelope(wav: torch.Tensor, frame: int = 480) -> torch.Tensor:
+    wav = wav.reshape(-1)
+    frames = wav.shape[0] // frame
+    if frames == 0:
+        return wav.abs()
+    return wav[: frames * frame].reshape(frames, frame).pow(2).mean(-1).sqrt()
+
+
 def _channel_similarity(a: torch.Tensor, b: torch.Tensor) -> float:
-    a, b = a.reshape(-1), b.reshape(-1)
+    # DialogueSidon là mô hình diffusion: hai chunk sinh lại cùng một câu nói với pha
+    # ngẫu nhiên, nên dot product trên dạng sóng gần như là nhiễu và chọn swap sai.
+    # So sánh đường bao năng lượng (RMS 20 ms) thì không phụ thuộc pha. Vẫn dùng dot
+    # product không chuẩn hoá để ưu tiên đoạn có giọng nói lớn thay vì đoạn chỉ có nhiễu.
+    a, b = _envelope(a), _envelope(b)
     a, b = a - a.mean(), b - b.mean()
-    # Dùng Dot Product (không chia cho mẫu số) để ưu tiên các đoạn có giọng nói lớn (energy cao).
-    # Nếu chia cho norm (Pearson correlation), các đoạn im lặng (chỉ có nhiễu noise) 
-    # sẽ bị phóng đại và làm đảo lộn logic ghép kênh (swap).
     return float(torch.dot(a, b))
 
 

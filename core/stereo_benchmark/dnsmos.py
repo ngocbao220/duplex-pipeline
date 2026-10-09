@@ -120,10 +120,12 @@ class DNSMOSScorer:
             
             primary_input_name = self.primary.get_inputs()[0].name
             p808_input_name = self.p808.get_inputs()[0].name
+            providers = self.primary.get_providers() if hasattr(self.primary, "get_providers") else ()
+            batch_size = 4 if "CUDAExecutionProvider" in providers else ONNX_BATCH_SIZE
             scores = []
-            for batch_start in range(0, num_hops, ONNX_BATCH_SIZE):
+            for batch_start in range(0, num_hops, batch_size):
                 chunks, features = [], []
-                for i in range(batch_start, min(batch_start + ONNX_BATCH_SIZE, num_hops)):
+                for i in range(batch_start, min(batch_start + batch_size, num_hops)):
                     audio_chunk = signal[i * SAMPLE_RATE : i * SAMPLE_RATE + window_samples]
                     mel_slice = full_mel[:, i * 100 : i * 100 + 900]
                     if audio_chunk.size != window_samples or mel_slice.shape[1] != 900:
