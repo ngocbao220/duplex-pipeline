@@ -28,6 +28,11 @@ class Config:
     cholimex_overlap_separator_backend: str = "dialoguesidon"
     cholimex_overlap_separator_model: str | None = "sarulab-speech/DialogueSidon"
     cholimex_speaker_embedding_model: str = "speechbrain/spkrec-ecapa-voxceleb"
+    cholimex_crossfade_ms: float = 40.0
+    cholimex_gate_fade_ms: float = 20.0
+    cholimex_gain_match: bool = True
+    cholimex_gain_context_s: float = 1.0
+    cholimex_gain_max: float = 2.0
 
 
 FIELD_ALIASES = {
@@ -60,6 +65,11 @@ CHOLIMEX_KEYS = [
     "overlap_separator_backend",
     "overlap_separator_model",
     "speaker_embedding_model",
+    "crossfade_ms",
+    "gate_fade_ms",
+    "gain_match",
+    "gain_context_s",
+    "gain_max",
 ]
 
 for _k in CHOLIMEX_KEYS:
@@ -85,7 +95,7 @@ def _flatten_mapping(node: dict[str, Any], prefix: str = "") -> dict[str, Any]:
 
 def apply_config_data(cfg: Config, data: dict[str, Any]) -> Config:
     if not isinstance(data, dict):
-        raise TypeError("config.json must contain a JSON object")
+        raise TypeError("Cholimex config must contain a mapping")
     for config_key, value in _flatten_mapping(data).items():
         if config_key in IGNORED_KEYS:
             continue
@@ -96,23 +106,19 @@ def apply_config_data(cfg: Config, data: dict[str, Any]) -> Config:
     return cfg
 
 
-def load_config(path: Path | str = Path("configs/config.json")) -> Config:
+def load_config(path: Path | str | None = None) -> Config:
+    """Load a resolved Cholimex config (JSON or YAML); defaults when no path is given."""
+    if path is None:
+        return Config()
     path_obj = Path(path)
-    if not path_obj.exists():
-        fallback_yaml = Path("configs/pipeline/cholimex.yaml")
-        if fallback_yaml.exists():
-            path_obj = fallback_yaml
-        else:
-            return Config()
+    if not path_obj.is_file():
+        raise FileNotFoundError(f"Cholimex config does not exist: {path_obj}")
 
     if path_obj.suffix in {".yaml", ".yml"}:
         try:
             from omegaconf import OmegaConf
             loaded = OmegaConf.load(path_obj)
-            try:
-                raw_data = OmegaConf.to_container(loaded, resolve=True)
-            except Exception:
-                raw_data = OmegaConf.to_container(loaded, resolve=False)
+            raw_data = OmegaConf.to_container(loaded, resolve=True)
         except ImportError:
             import yaml
             with path_obj.open("r", encoding="utf-8") as handle:

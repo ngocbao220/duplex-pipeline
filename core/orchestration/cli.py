@@ -87,19 +87,10 @@ def run_pipeline_command(name: str, argv: list[str] | None = None) -> int:
             raise SystemExit(f"DuplexChat stereo input does not exist: {args.input}")
         if not args.mixture.is_file():
             raise SystemExit(f"Original mixture input does not exist: {args.mixture}")
-        if args.output_dir.exists():
-            raise SystemExit(f"Cholimex collection output already exists: {args.output_dir}")
         from core.config import load_config
         from cholimex.collection import refine_stereo_file
 
-        config_path = getattr(args, "config", None)
-        if config_path is None:
-            if (ROOT / "configs/config.json").exists():
-                config_path = ROOT / "configs/config.json"
-            elif (ROOT / "configs/pipeline/cholimex.yaml").exists():
-                config_path = ROOT / "configs/pipeline/cholimex.yaml"
-
-        cholimex_cfg = load_config(config_path) if config_path else load_config()
+        cholimex_cfg = load_config(args.config)
 
         output_dir = args.output_dir.resolve()
         stereo = refine_stereo_file(
@@ -108,7 +99,7 @@ def run_pipeline_command(name: str, argv: list[str] | None = None) -> int:
             cholimex_cfg,
             mixture_path=args.mixture.resolve(),
         )
-        print(f"Done\n-> VAD: {output_dir / 'vad_left.txt'}, {output_dir / 'vad_right.txt'}\n-> stereo: {stereo}", flush=True)
+        print(f"Done\n-> stereo: {stereo}\n-> debug: {output_dir / 'debug'}", flush=True)
         return 0
     if args.command == "split_valid_dialogue":
         if name != "duplexchat":

@@ -138,7 +138,7 @@ sommelier_profile:
 
 # ------------------------------------------------------------------------------
 # 8c. CẤU HÌNH CHI TIẾT CHOLIMEX (DÙNG KHI pipeline.name=cholimex)
-# (LƯU Ý: CLI cholimex collection đang đọc trực tiếp configs/config.json - file hiện chưa tồn tại)
+# (run_pipeline ghi nhánh pipeline đã resolve ra cholimex_config.json và truyền qua --config)
 # ------------------------------------------------------------------------------
 cholimex_profile:
   backchannel_max_duration: 1.0           # Thời lượng tối đa (giây) để coi là từ đệm/tiếng ậm ừ (backchannel)
@@ -156,6 +156,11 @@ cholimex_profile:
   overlap_separator_backend: sepreformer  # Backend chuyên tách vùng chồng lấn (overlap)
   overlap_separator_model: ${env.paths.sepreformer} # Đường dẫn checkpoint model tách overlap
   speaker_embedding_model: ${env.paths.speechbrain} # Checkpoint model trích xuất speaker embedding
+  crossfade_ms: 40.0                      # Độ dài crossfade (ms) tại biên audio gốc <-> DialogueSidon
+  gate_fade_ms: 20.0                      # Độ dài fade (ms) khi vào/ra vùng im lặng
+  gain_match: true                        # Khớp âm lượng đoạn overlap với tiếng gốc liền kề
+  gain_context_s: 1.0                     # Cửa sổ (giây) tiếng gốc liền kề dùng để đo âm lượng
+  gain_max: 2.0                           # Giới hạn hệ số gain trong [1/gain_max, gain_max]
 
 # ------------------------------------------------------------------------------
 # 9. TỰ ĐỘNG NHẬN DẠNG TIẾNG NÓI & GIÓNG HÀNG (ASR & ALIGNMENT - PHASE 3)

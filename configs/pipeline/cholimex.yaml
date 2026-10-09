@@ -16,3 +16,10 @@ proposal_model: ${env.paths.dialoguesidon}
 overlap_separator_backend: sepreformer
 overlap_separator_model: ${env.paths.sepreformer}
 speaker_embedding_model: ${env.paths.speechbrain}
+
+# Reconstruction smoothing between original-mixture and DialogueSidon audio
+crossfade_ms: 40.0
+gate_fade_ms: 20.0
+gain_match: true
+gain_context_s: 1.0
+gain_max: 2.0

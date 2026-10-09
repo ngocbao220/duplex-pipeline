@@ -280,7 +280,7 @@ def _run_sommelier_item(
 
 
 def _cholimex_complete(output: Path, conversation_idx: int) -> bool:
-    stereo = output / f"cholimex_stereo_{conversation_idx}.wav"
+    stereo = output / f"stereo_{conversation_idx}.wav"
     return stereo.is_file() and stereo.stat().st_size > 0
 
 
@@ -1473,7 +1473,7 @@ def run_batch():
             if not mixture.is_file():
                 missing_mixtures.append((stereo, mixture))
                 continue
-            output = output_dir / relative_parent / f"cholimex_{match.group(1)}"
+            output = output_dir / relative_parent
             pairs.append((stereo, mixture, output, int(match.group(1))))
 
         for stereo, mixture in missing_mixtures:
@@ -1511,7 +1511,8 @@ def run_batch():
                             "audio_seconds": _audio_duration_seconds(stereo), "real_time_factor": 0.0,
                             "audio_seconds_per_wall_second": None, "exit_code": 0, "status": "complete", "resumed": True,
                         }
-                    _archive_incomplete_output(output)
+                    # Conversations share the output folder; only archive this one's debug artifacts.
+                    _archive_incomplete_output(output / "debug" / f"conversation_{conversation_idx}")
                     worker_env = dict(env)
                     if target_gpu != "cpu":
                         worker_env["CUDA_VISIBLE_DEVICES"] = target_gpu
@@ -1524,7 +1525,7 @@ def run_batch():
                         *cholimex_extra,
                     ]
                     print(f"[{idx}/{len(pairs)}] {gpu_tag}{stereo.name} + {mixture.name} -> {output}")
-                    timing = _timed_subprocess(cmd, stereo, output, worker_env)
+                    timing = _timed_subprocess(cmd, stereo, output / f"stereo_{conversation_idx}.wav", worker_env)
                     if timing["exit_code"] != 0:
                         print(f"Error refining {stereo.name} (exit code {timing['exit_code']})")
                     return timing

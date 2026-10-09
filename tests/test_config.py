@@ -436,3 +436,15 @@ def test_core_runtime_dependencies_are_pinned():
     # ASR Python startup hook requires this module in the isolated ASR runtime.
     asr_req = (root / "requirements-asr.txt").read_text()
     assert "wrapt" in asr_req.splitlines()
+
+
+def test_cholimex_config_defaults_without_a_file_and_rejects_unresolved_paths(tmp_path):
+    import pytest
+
+    assert load_config().cholimex_crossfade_ms == 40.0
+    raw = tmp_path / "cholimex.yaml"
+    raw.write_text("proposal_model: ${env.paths.dialoguesidon}\n")
+    with pytest.raises(Exception):
+        load_config(raw)
+    with pytest.raises(FileNotFoundError):
+        load_config(tmp_path / "missing.json")

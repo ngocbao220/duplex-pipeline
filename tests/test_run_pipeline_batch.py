@@ -492,6 +492,7 @@ def test_cholimex_dry_run_pairs_each_duplexchat_stereo_with_its_dialogue_mixture
     assert "stereo_1.wav" in output
     assert "dialogue_1.wav" in output
     assert "-m cholimex collection" in output
+    assert f"--output-dir {tmp_path / 'cholimex' / 'episode'}" in output
 
 
 def test_auto_tuning_calibrates_before_expanding_gpu_workers(monkeypatch):
@@ -568,7 +569,7 @@ def test_resume_helpers_only_accept_complete_phase_artifacts(tmp_path):
     cholimex_out = tmp_path / "cholimex_1"
     cholimex_out.mkdir()
     assert not batch._cholimex_complete(cholimex_out, 1)
-    (cholimex_out / "cholimex_stereo_1.wav").write_bytes(b"stereo")
+    (cholimex_out / "stereo_1.wav").write_bytes(b"stereo")
     assert batch._cholimex_complete(cholimex_out, 1)
 
 
