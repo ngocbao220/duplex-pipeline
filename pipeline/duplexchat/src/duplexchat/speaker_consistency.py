@@ -143,16 +143,30 @@ def _decode_permutation(
     switch_penalty: float,
     iterations: int,
 ) -> list[int] | None:
-    """Cluster per-block embeddings into two speakers and Viterbi-decode the swap path."""
+    """Synchronise per-block channel order and Viterbi-decode the swap path."""
     all_embeddings = [emb for row in embeddings for emb in row if emb is not None]
     if len(all_embeddings) < 2:
         return None
-    centroids = _init_centroids(embeddings, all_embeddings)
-    states = [0] * len(embeddings)
+    # Remove the component every speech embedding shares; without it two similar
+    # voices (same gender, same recording) sit almost on top of each other.
+    mean = torch.stack(all_embeddings).mean(0)
+    centered = [[None if emb is None else F.normalize(emb - mean, dim=0) for emb in row] for row in embeddings]
+
+    # Spectral permutation synchronisation: a block's left-minus-right vector points
+    # from speaker B to speaker A, and flips sign when the block is swapped, so the
+    # principal direction of all those vectors orients every block without needing
+    # an initial guess of who is who.
+    diffs = torch.stack([_side(row, 0, mean.numel()) - _side(row, 1, mean.numel()) for row in centered])
+    if float(diffs.abs().sum()) == 0.0:
+        return None
+    direction = torch.linalg.svd(diffs, full_matrices=False).Vh[0]
+    states = _viterbi([-float(diff @ direction) for diff in diffs], switch_penalty)
+
     for _ in range(iterations):
-        scores = [_swap_score(row, centroids) for row in embeddings]
-        states = _viterbi(scores, switch_penalty)
-        centroids = _update_centroids(embeddings, states, centroids)
+        centroids = _update_centroids(centered, states)
+        if centroids is None:
+            break
+        states = _viterbi([_swap_score(row, centroids) for row in centered], switch_penalty)
 
     # Orient so the dominant channel order (by evidence) stays unchanged.
     kept = sum(1 for row, state in zip(embeddings, states) if not state and any(e is not None for e in row))
@@ -162,21 +176,9 @@ def _decode_permutation(
     return states
 
 
-def _init_centroids(embeddings, all_embeddings) -> tuple[torch.Tensor, torch.Tensor]:
-    # Prefer a block where both channels speak: the separator's own split there is the
-    # most reliable statement of "these are two different people".
-    best = None
-    for row in embeddings:
-        if row[0] is not None and row[1] is not None:
-            similarity = float(row[0] @ row[1])
-            if best is None or similarity < best[0]:
-                best = (similarity, row[0], row[1])
-    if best is not None:
-        return best[1], best[2]
-    stacked = torch.stack(all_embeddings)
-    first = stacked[0]
-    second = stacked[int(torch.argmin(stacked @ first))]
-    return first, second
+def _side(row: list[torch.Tensor | None], channel: int, size: int) -> torch.Tensor:
+    emb = row[channel]
+    return emb if emb is not None else torch.zeros(size)
 
 
 def _swap_score(row, centroids) -> float:
@@ -217,13 +219,12 @@ def _viterbi(scores: list[float], switch_penalty: float) -> list[int]:
     return list(reversed(path))
 
 
-def _update_centroids(embeddings, states, previous) -> tuple[torch.Tensor, torch.Tensor]:
+def _update_centroids(embeddings, states) -> tuple[torch.Tensor, torch.Tensor] | None:
     groups: list[list[torch.Tensor]] = [[], []]
     for row, state in zip(embeddings, states):
         for channel, emb in enumerate(row):
             if emb is not None:
                 groups[channel ^ state].append(emb)
-    return tuple(  # type: ignore[return-value]
-        F.normalize(torch.stack(group).mean(0), dim=0) if group else previous[index]
-        for index, group in enumerate(groups)
-    )
+    if not groups[0] or not groups[1]:
+        return None
+    return F.normalize(torch.stack(groups[0]).mean(0), dim=0), F.normalize(torch.stack(groups[1]).mean(0), dim=0)
