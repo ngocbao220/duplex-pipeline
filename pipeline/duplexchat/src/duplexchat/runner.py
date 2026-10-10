@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
+import json
 import os
 from pathlib import Path
 import re
@@ -27,6 +28,7 @@ from core.outputs import (
 from .audio import load_wav_tensor
 from .devices import resolve_device, validate_multi_gpu
 from .diarization import diarize
+from .diarization_alignment import align_to_diarization
 from .dialogue import dialogue_filter_summary, extract_valid_dialogues
 from .music import load_music_filter
 from .preprocess import prepare_input, write_input_wav, write_wav
@@ -631,6 +633,16 @@ def split_valid_dialogues(
     return manifest
 
 
+def _dialogue_turns(dialogue_wav: Path) -> list[dict]:
+    """Read the split step's diarization turns for one dialogue, if they were written."""
+    metadata = dialogue_wav.with_suffix(".json")
+    try:
+        turns = json.loads(metadata.read_text(encoding="utf-8")).get("speaker_turns") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    return turns if len({turn.get("speaker") for turn in turns}) >= 2 else []
+
+
 def separate_dialogue_files(
     input_path_str: str,
     output_dir: str,
@@ -753,9 +765,16 @@ def separate_dialogue_files(
                 if torch.cuda.is_available() and device.startswith("cuda"):
                     torch.cuda.set_device(torch.device(device))
 
+                turns = _dialogue_turns(dialogue_wav)
+                # Diarization turns are a stronger speaker anchor than unsupervised embeddings.
                 first, second, output_rate = separate_waveform(
-                    crop, sample_rate, models[device], num_steps, separate_chunk, _no_progress
+                    crop, sample_rate, models[device], num_steps, separate_chunk, _no_progress, not turns
                 )
+                if turns:
+                    first, second, alignment = align_to_diarization(first, second, output_rate, turns)
+                    if alignment.segments:
+                        logger.info("%s: swapped %.1fs back to the diarized speaker's channel",
+                                    dialogue_wav.name, alignment.swapped_seconds)
 
                 first = _resample(first, output_rate, OUTPUT_SAMPLE_RATE)
                 second = _resample(second, output_rate, OUTPUT_SAMPLE_RATE)

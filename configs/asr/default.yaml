@@ -18,3 +18,15 @@ regions:
 channel_matching:
   min_score: 0.4
   min_margin: 0.05
+# Trainer prepared_dir export (docs/prepared_data.md). Not part of the ASR resume signature.
+export:
+  enabled: true                       # Export right after ASR; also available as step=export
+  out_dir: ${data.base_output_dir}/ready   # -> ready/train.jsonl + ready/samples/<id>/
+  swap_roles: false                   # false: LEFT channel = agent; true: swap so RIGHT speaker becomes agent
+  language: vi
+  text_prompt_left: "Bạn là trợ lý thân thiện."
+  text_prompt_right: "Bạn là khách hàng hỏi thông tin."
+  voice_prompt:
+    min_seconds: 5.0
+    max_seconds: 10.0
+    min_gap_to_other: 0.3             # Seconds kept away from the other speaker's turns

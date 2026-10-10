@@ -41,6 +41,17 @@ def _offline_preflight(cfg: dict, pipeline_name: str) -> None:
         raise FileNotFoundError("ASR offline preflight failed: " + ", ".join(missing))
 
 
+def _maybe_export(stereo_root: Path, export_cfg: dict) -> int:
+    """Build the trainer prepared_dir from finished ASR outputs."""
+    if not export_cfg.get("enabled", False):
+        return 0
+    from core.asr.prepared_export import export_config
+    from scripts.export_prepared import run_export
+
+    out_dir = Path(export_cfg.get("out_dir") or stereo_root.parent / "ready")
+    return run_export(stereo_root, out_dir, export_config(export_cfg))
+
+
 def run() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pipeline", choices=("duplexchat", "sommelier"), required=True)
@@ -51,6 +62,8 @@ def run() -> int:
     args = parser.parse_args()
 
     cfg = json.loads(args.config_json)
+    # Export settings must not invalidate ASR resume signatures.
+    export_cfg = cfg.pop("export", None) or {}
     if args.offline:
         os.environ["MODE"] = "sever"
         os.environ["HF_HUB_OFFLINE"] = "1"
@@ -84,7 +97,7 @@ def run() -> int:
         pending.append((stereo, relative, output))
     if not pending:
         print(f"ASR: {report['complete']}/{report['total']} complete -> {report_path}")
-        return 0
+        return _maybe_export(args.stereo_root, export_cfg)
     try:
         if args.offline:
             _offline_preflight(cfg, args.pipeline)
@@ -118,7 +131,8 @@ def run() -> int:
             print(f"ASR failed {relative}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         write_json(report_path, report)
     print(f"ASR: {report['complete']}/{report['total']} complete, {report['failed']} failed -> {report_path}")
-    return 1 if report["failed"] else 0
+    export_status = _maybe_export(args.stereo_root, export_cfg)
+    return 1 if report["failed"] else export_status
 
 
 if __name__ == "__main__":

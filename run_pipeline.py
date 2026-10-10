@@ -367,6 +367,25 @@ def step_asr(cfg: DictConfig, env: dict[str, str]) -> int:
     return _run_cmd(cmd, env, dry_run=cfg.dry_run)
 
 
+def step_export(cfg: DictConfig, env: dict[str, str]) -> int:
+    """Rebuild the trainer prepared_dir (train.jsonl + samples/) from existing ASR outputs."""
+    pipeline_name = str(cfg.pipeline.name).lower()
+    if pipeline_name not in {"duplexchat", "sommelier"}:
+        logger.error("Export supports pipeline=duplexchat or pipeline=sommelier; got %s", pipeline_name)
+        return 1
+    stereo_root = Path(cfg.data.stereo_root) if cfg.data.stereo_root else Path(
+        cfg.data.duplex_out_dir if pipeline_name == "duplexchat" else cfg.data.sommelier_out_dir
+    )
+    export_cfg = OmegaConf.to_container(cfg.asr.export, resolve=True)
+    out_dir = export_cfg.get("out_dir") or str(stereo_root.parent / "ready")
+    cmd = [str(cfg.asr.python) if cfg.asr.get("python") else sys.executable,
+           str(ROOT_DIR / "scripts" / "export_prepared.py"),
+           "--stereo-root", str(stereo_root),
+           "--out-dir", str(out_dir),
+           "--config-json", json.dumps(export_cfg)]
+    return _run_cmd(cmd, env, dry_run=cfg.dry_run)
+
+
 def step_cholimex(cfg: DictConfig, env: dict[str, str]) -> int:
     """Refine each DuplexChat stereo clip using its matching dialogue mixture."""
     print(section("Cholimex Refinement"))
@@ -591,6 +610,9 @@ def main(cfg: DictConfig) -> None:
 
     elif step == "asr":
         sys.exit(step_asr(cfg, env))
+
+    elif step == "export":
+        sys.exit(step_export(cfg, env))
 
     elif step == "cholimex":
         sys.exit(step_cholimex(cfg, env))
